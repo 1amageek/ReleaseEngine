@@ -1,0 +1,35 @@
+{
+  "createdAt": "2026-07-12T00:00:00Z",
+  "domainResults": [
+    {
+      "caseCount": 3,
+      "coverageTagCount": 4,
+      "coveredRequiredCoverageTagCount": 4,
+      "domain": "drc",
+      "durationBudgetPassRate": 1,
+      "qualified": true,
+      "passRate": 1,
+      "report": {
+        "byteCount": 21,
+        "path": "reports/drc.json",
+        "sha256": "a4ea024aaeb78872ba67c3b9899340144ee2e694b774a3b04a1a1a1a9d6e8d6a",
+        "status": "passed"
+      },
+      "status": "passed",
+      "toolEvidence": {
+        "checkedAt": "2026-07-12T00:00:00Z",
+        "evidenceID": "native-drc-corpus",
+        "failureCodes": []
+      },
+      "toolEvidenceExport": {
+        "byteCount": 22,
+        "path": "evidence/drc.json",
+        "sha256": "6f471ae0177ec6ad669b7e25d15d147eb1657594d2ccc09141c6f723b0424ba7",
+        "status": "passed"
+      }
+    }
+  ],
+  "externalOracleResults": [],
+  "schemaVersion": 1,
+  "status": "passed"
+}

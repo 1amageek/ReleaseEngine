@@ -1,0 +1,21 @@
+{
+  "createdAt": "2026-07-12T00:00:00Z",
+  "lanes": [
+    {
+      "corpusSpec": "qualification/suite.json",
+      "domain": "drc",
+      "evidenceExportPath": "evidence/drc.json",
+      "kind": "native-corpus",
+      "laneID": "drc:native-corpus",
+      "reportPath": "reports/drc.json",
+      "requiredProbeIDs": []
+    }
+  ],
+  "requirements": {
+    "domainIDs": ["drc"],
+    "requiredArtifacts": ["reports/drc.json", "evidence/drc.json"],
+    "requireExternalOracles": false
+  },
+  "schemaVersion": 1,
+  "suiteID": "release-engine-retained-smoke"
+}
