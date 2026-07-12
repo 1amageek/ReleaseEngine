@@ -1,4 +1,5 @@
 import Foundation
+import LogicIR
 import XcircuitePackage
 import ReleaseCore
 
@@ -12,6 +13,7 @@ public struct SignoffRequest: XcircuiteEngineRequest {
     public var profileID: String
     public var designKind: ReleaseDesignKind
     public var designDigest: String
+    public var designProvenance: LogicDesignProvenance?
     public var pdkDigest: String
     public var evidence: [XcircuiteFileReference]
     public var evidenceRecords: [ReleaseSignoffEvidenceReference]
@@ -25,6 +27,7 @@ public struct SignoffRequest: XcircuiteEngineRequest {
         inputs: [XcircuiteFileReference],
         profileID: String,
         designDigest: String,
+        designProvenance: LogicDesignProvenance? = nil,
         pdkDigest: String,
         evidence: [XcircuiteFileReference],
         designKind: ReleaseDesignKind = .digital,
@@ -40,6 +43,7 @@ public struct SignoffRequest: XcircuiteEngineRequest {
         self.profileID = profileID
         self.designKind = designKind
         self.designDigest = designDigest
+        self.designProvenance = designProvenance
         self.pdkDigest = pdkDigest
         self.evidence = evidence
         self.evidenceRecords = evidenceRecords

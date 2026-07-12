@@ -175,7 +175,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
                 streamOut.manifest.streamedArtifact,
             ] + request.evidence + [releaseArtifact])
             let unsigned = FoundryHandoffManifest(
-                releaseID: "(request.runID)-tapeout",
+                releaseID: "\(request.runID)-tapeout",
                 foundryID: request.foundryID,
                 signoffBundleDigest: bundle.bundleDigest ?? "",
                 designDigest: bundle.designDigest,

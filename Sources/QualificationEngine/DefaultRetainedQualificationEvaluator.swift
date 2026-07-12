@@ -42,10 +42,6 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
         guard let projectRoot = request.projectRoot.map(URL.init(fileURLWithPath:)) else {
             return blockedEnvelope(request: request, metadata: metadata, code: "QUALIFICATION_PROJECT_ROOT_REQUIRED", message: "A project root is required to verify retained qualification artifacts.")
         }
-        if request.policy.requiredQualificationLevel > .oracleChecked {
-            return blockedEnvelope(request: request, metadata: metadata, code: "QUALIFICATION_LEVEL_NOT_IMPLEMENTED", message: "Production eligibility promotion requires the later process-promotion milestone.")
-        }
-
         var diagnostics: [XcircuiteEngineDiagnostic] = []
         var blockedLanes = Set<String>()
         var failedLanes = Set<String>()
@@ -81,7 +77,7 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
                 diagnostics: diagnostics,
                 artifacts: artifacts,
                 metadata: metadata,
-                payload: payload(request: request, status: status, level: .unknown, digest: nil, laneResults: laneResults, blockedLanes: blockedLanes, failedLanes: failedLanes)
+                payload: payload(request: request, status: status, level: .unknown, digest: nil, diagnostics: diagnostics, laneResults: laneResults, blockedLanes: blockedLanes, failedLanes: failedLanes)
             )
         }
 
@@ -114,7 +110,14 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
             currentDate: now(),
             add: add
         )
-        validateToolEvidence(request.toolEvidence, policy: request.policy, currentDate: now(), add: add)
+        validateToolEvidence(
+            request.toolEvidence,
+            evidenceArtifacts: request.evidenceArtifacts,
+            policy: request.policy,
+            projectRoot: projectRoot,
+            currentDate: now(),
+            add: add
+        )
 
         for requiredLane in request.policy.requiredLanes.sorted(by: { $0.laneID < $1.laneID }) {
             guard let suiteLane = suite.lanes.first(where: { $0.laneID == requiredLane.laneID }) else {
@@ -132,6 +135,12 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
             if requiredLane.reportPath != nil && reportArtifact == nil {
                 blockedLanes.insert(requiredLane.laneID)
                 add("QUALIFICATION_DOMAIN_REPORT_MISSING", "Required domain report artifact is not present in the request.", entity: requiredLane.laneID, blocked: true)
+            }
+            let corpusArtifact = matchingArtifact(for: requiredLane.corpusSpecPath, in: request.corpusSpecArtifacts)
+            if requiredLane.kind == .externalOracle,
+               requiredLane.corpusSpecPath != nil && corpusArtifact == nil {
+                blockedLanes.insert(requiredLane.laneID)
+                add("QUALIFICATION_CORPUS_SPEC_MISSING", "Required corpus specification artifact is not present in the request.", entity: requiredLane.laneID, blocked: true)
             }
             let evidenceArtifact = matchingArtifact(for: requiredLane.evidenceExportPath, in: request.evidenceArtifacts)
             if requiredLane.evidenceExportPath != nil && evidenceArtifact == nil {
@@ -151,7 +160,7 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
             case .externalOracle:
                 guard let oracleResult = report.externalOracleResults.first(where: {
                     $0.domain == requiredLane.domain
-                        && (requiredLane.oracleBackendID == nil || $0.oracleBackendID == requiredLane.oracleBackendID)
+                        && $0.oracleBackendID == requiredLane.oracleBackendID
                 }) else {
                     blockedLanes.insert(requiredLane.laneID)
                     add("QUALIFICATION_ORACLE_RESULT_MISSING", "Retained report has no result for the required external oracle lane.", entity: requiredLane.laneID, blocked: true)
@@ -182,12 +191,28 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
             if (metrics.passRate ?? -1) < request.policy.minimumPassRate { failureCodes.append("PASS_RATE_BELOW_THRESHOLD") }
             if (metrics.durationBudgetPassRate ?? -1) < request.policy.minimumDurationBudgetPassRate { failureCodes.append("DURATION_BUDGET_BELOW_THRESHOLD") }
             if requiredLane.kind == .externalOracle {
+                if observation.status == "unavailable" {
+                    blockedLanes.insert(requiredLane.laneID)
+                    add("QUALIFICATION_ORACLE_UNAVAILABLE", "The required external oracle reported an unavailable state.", entity: requiredLane.laneID, blocked: true)
+                }
                 guard let oracleAgreementRate = metrics.oracleAgreementRate else {
                     blockedLanes.insert(requiredLane.laneID)
                     add("QUALIFICATION_ORACLE_AGREEMENT_MISSING", "External oracle lane has no oracle agreement metric.", entity: requiredLane.laneID, blocked: true)
                     continue
                 }
                 if oracleAgreementRate < request.policy.minimumOracleAgreementRate { failureCodes.append("ORACLE_AGREEMENT_BELOW_THRESHOLD") }
+                let correlation = validateOracleCorrelation(
+                    requiredLane: requiredLane,
+                    suite: suite,
+                    report: report
+                )
+                if correlation.blocked {
+                    blockedLanes.insert(requiredLane.laneID)
+                    for diagnostic in correlation.diagnostics {
+                        add(diagnostic.code, diagnostic.message, entity: requiredLane.laneID, blocked: true)
+                    }
+                }
+                failureCodes.append(contentsOf: correlation.failureCodes)
             }
 
             let domainStatus = failureCodes.isEmpty ? "passed" : "failed"
@@ -208,12 +233,20 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
                 oracleAgreementRate: metrics.oracleAgreementRate,
                 durationBudgetPassRate: metrics.durationBudgetPassRate,
                 failureCodes: failureCodes,
+                corpusArtifact: corpusArtifact,
                 reportArtifact: reportArtifact,
                 evidenceArtifact: evidenceArtifact
             ))
         }
 
-        let level: ToolQualificationLevel = request.policy.requiredLanes.contains { $0.kind == .externalOracle } ? .oracleChecked : .corpusChecked
+        var level: ToolQualificationLevel = request.policy.requiredLanes.contains { $0.kind == .externalOracle } ? .oracleChecked : .corpusChecked
+        let allLanesQualified = laneResults.count == request.policy.requiredLanes.count
+            && blockedLanes.isEmpty
+            && failedLanes.isEmpty
+            && status == .completed
+        if allLanesQualified && request.policy.requiredQualificationLevel == .productionEligible {
+            level = .productionEligible
+        }
         if level < request.policy.requiredQualificationLevel {
             add("QUALIFICATION_LEVEL_BELOW_POLICY", "Observed retained evidence level is below the policy requirement.", entity: request.policy.policyID, blocked: true)
         }
@@ -224,7 +257,7 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
             diagnostics: diagnostics,
             artifacts: artifacts,
             metadata: metadata,
-            payload: payload(request: request, status: status, level: level, digest: qualificationDigest, laneResults: laneResults, blockedLanes: blockedLanes, failedLanes: failedLanes)
+            payload: payload(request: request, status: status, level: level, digest: qualificationDigest, diagnostics: diagnostics, laneResults: laneResults, blockedLanes: blockedLanes, failedLanes: failedLanes)
         )
     }
 
@@ -286,6 +319,106 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
         }
     }
 
+    private struct CorrelationDiagnostic {
+        var code: String
+        var message: String
+    }
+
+    private struct CorrelationOutcome {
+        var blocked = false
+        var diagnostics: [CorrelationDiagnostic] = []
+        var failureCodes: [String] = []
+    }
+
+    private func validateOracleCorrelation(
+        requiredLane: ReleaseQualificationLane,
+        suite: RetainedCorpusSuite,
+        report: RetainedCorpusReport
+    ) -> CorrelationOutcome {
+        var outcome = CorrelationOutcome()
+
+        func block(_ code: String, _ message: String) {
+            outcome.blocked = true
+            outcome.diagnostics.append(CorrelationDiagnostic(code: code, message: message))
+        }
+
+        guard let native = report.domainResults.first(where: { $0.domain == requiredLane.domain }) else {
+            block("QUALIFICATION_NATIVE_CORPUS_RESULT_MISSING", "External oracle correlation requires a native corpus result for the same domain.")
+            return outcome
+        }
+        guard let oracle = report.externalOracleResults.first(where: {
+            $0.domain == requiredLane.domain && $0.oracleBackendID == requiredLane.oracleBackendID
+        }) else {
+            block("QUALIFICATION_ORACLE_RESULT_MISSING", "External oracle correlation result is missing for the required backend and domain.")
+            return outcome
+        }
+
+        let suiteCases = suite.cases.filter { $0.domain == requiredLane.domain }
+        guard !suiteCases.isEmpty else {
+            block("QUALIFICATION_CORPUS_CASES_MISSING", "External oracle correlation requires explicit retained corpus cases for the domain.")
+            return outcome
+        }
+
+        let expectedIDs = Set(suiteCases.map(\.caseID))
+        let nativeIDs = Set(native.caseResults.map(\.caseID))
+        let oracleIDs = Set(oracle.caseResults.map(\.caseID))
+        guard nativeIDs == expectedIDs else {
+            block("QUALIFICATION_NATIVE_CASE_SET_MISMATCH", "Native corpus case IDs do not exactly match the retained suite case IDs.")
+            return outcome
+        }
+        guard oracleIDs == expectedIDs else {
+            block("QUALIFICATION_ORACLE_CASE_SET_MISMATCH", "External oracle case IDs do not exactly match the retained suite case IDs.")
+            return outcome
+        }
+
+        if let caseCount = native.caseCount, caseCount != native.caseResults.count {
+            block("QUALIFICATION_NATIVE_CASE_COUNT_MISMATCH", "Native corpus aggregate caseCount does not match its case-level results.")
+        }
+        if let caseCount = oracle.caseCount, caseCount != oracle.caseResults.count {
+            block("QUALIFICATION_ORACLE_CASE_COUNT_MISMATCH", "External oracle aggregate caseCount does not match its case-level results.")
+        }
+
+        let nativeByID = Dictionary(uniqueKeysWithValues: native.caseResults.map { ($0.caseID, $0) })
+        let oracleByID = Dictionary(uniqueKeysWithValues: oracle.caseResults.map { ($0.caseID, $0) })
+        let requiredProbes = Set(requiredLane.requiredProbeIDs)
+
+        for suiteCase in suiteCases.sorted(by: { $0.caseID < $1.caseID }) {
+            guard let nativeCase = nativeByID[suiteCase.caseID],
+                  let oracleCase = oracleByID[suiteCase.caseID] else {
+                block("QUALIFICATION_CASE_RESULT_MISSING", "Native and oracle case-level results must be present for every retained case.")
+                continue
+            }
+
+            if Set(suiteCase.coverageTags) != Set(nativeCase.coverageTags)
+                || Set(suiteCase.coverageTags) != Set(oracleCase.coverageTags) {
+                block("QUALIFICATION_CASE_COVERAGE_TAG_MISMATCH", "Native and oracle case coverage tags do not match the retained suite.")
+            }
+            if Set(suiteCase.probeIDs) != Set(nativeCase.probeIDs)
+                || Set(suiteCase.probeIDs) != Set(oracleCase.probeIDs) {
+                block("QUALIFICATION_CASE_PROBE_MISMATCH", "Native and oracle case probe IDs do not match the retained suite.")
+            }
+            if !requiredProbes.isSubset(of: Set(suiteCase.probeIDs)) {
+                block("QUALIFICATION_ORACLE_PROBE_MISSING", "A retained oracle case does not include every probe required by the qualification lane.")
+            }
+
+            guard let agreement = oracleCase.agreement else {
+                block("QUALIFICATION_CASE_AGREEMENT_MISSING", "External oracle case results must explicitly record agreement.")
+                continue
+            }
+            if !agreement {
+                outcome.failureCodes.append("ORACLE_CASE_MISMATCH")
+            }
+            if nativeCase.status != oracleCase.nativeStatus
+                || oracleCase.nativeStatus != oracleCase.oracleStatus {
+                outcome.failureCodes.append("ORACLE_CASE_STATUS_MISMATCH")
+            }
+        }
+
+        outcome.failureCodes = Array(Set(outcome.failureCodes)).sorted()
+        outcome.diagnostics = outcome.diagnostics.sorted { $0.code < $1.code }
+        return outcome
+    }
+
     private func validateFreshness(
         reportCreatedAt: String?,
         maximumAgeSeconds: TimeInterval,
@@ -306,7 +439,9 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
 
     private func validateToolEvidence(
         _ evidence: [ToolEvidence],
+        evidenceArtifacts: [XcircuiteFileReference],
         policy: ReleaseQualificationPolicy,
+        projectRoot: URL,
         currentDate: Date,
         add: (_ code: String, _ message: String, _ entity: String?, _ blocked: Bool) -> Void
     ) {
@@ -322,9 +457,138 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
                 continue
             }
             if policy.requiredQualifiedEvidenceKinds.contains(kind),
-               !fresh.contains(where: { $0.hasPassingQualificationSupport(requiredScope: policy.requiredQualificationScope) }) {
-                add("QUALIFICATION_TOOL_EVIDENCE_UNQUALIFIED", "Required tool evidence does not contain a passing qualification summary with the required process scope.", kind.rawValue, true)
+               !fresh.contains(where: {
+                   $0.hasPassingQualificationSupport(
+                       requiredScope: policy.requiredQualificationScope,
+                       requireIndependentQualificationEvidence: policy.requireIndependentProcessQualification
+                            && kind == .productionApproval
+                   )
+               }) {
+                let hasScopedFailure = fresh.contains { item in
+                    guard let qualification = item.qualification else {
+                        return false
+                    }
+                    return qualification.scope == policy.requiredQualificationScope
+                        && !qualification.qualified
+                }
+                if hasScopedFailure {
+                    add("QUALIFICATION_TOOL_EVIDENCE_FAILED", "Required tool evidence contains a fresh, process-scoped qualification failure.", kind.rawValue, false)
+                } else {
+                    add("QUALIFICATION_TOOL_EVIDENCE_UNQUALIFIED", "Required tool evidence does not contain a passing qualification summary with the required process scope.", kind.rawValue, true)
+                }
             }
+        }
+
+        guard policy.requireIndependentProcessQualification else {
+            return
+        }
+
+        let productionApprovals = evidence.filter { $0.kind == .productionApproval }.filter { item in
+            guard let checkedAt = item.checkedAt else { return false }
+            let age = currentDate.timeIntervalSince(checkedAt)
+            return age >= 0 && age <= policy.maximumEvidenceAgeSeconds
+        }
+        guard !productionApprovals.isEmpty else {
+            add(
+                "QUALIFICATION_PROCESS_EVIDENCE_MISSING",
+                "Independent process qualification requires a fresh production approval evidence item.",
+                ToolEvidenceKind.productionApproval.rawValue,
+                true
+            )
+            return
+        }
+
+        var foundValidRecord = false
+        for approval in productionApprovals {
+            guard let artifact = approval.artifact else {
+                add(
+                    "QUALIFICATION_PROCESS_EVIDENCE_ARTIFACT_MISSING",
+                    "Production approval evidence must reference a persisted process qualification artifact.",
+                    approval.evidenceID,
+                    true
+                )
+                continue
+            }
+            guard evidenceArtifacts.contains(where: { reference in
+                pathsMatch(reference.path, artifact.path)
+                    && reference.sha256 == artifact.sha256
+                    && reference.byteCount == artifact.byteCount
+            }) else {
+                add(
+                    "QUALIFICATION_PROCESS_EVIDENCE_ARTIFACT_UNDECLARED",
+                    "Process qualification artifact is not declared in the request evidence artifacts.",
+                    artifact.path,
+                    true
+                )
+                continue
+            }
+            guard let url = verifier.resolvedURL(for: artifact, projectRoot: projectRoot) else {
+                add(
+                    "QUALIFICATION_PROCESS_EVIDENCE_PATH_INVALID",
+                    "Process qualification artifact path is not a safe project-relative path.",
+                    artifact.path,
+                    true
+                )
+                continue
+            }
+            let record: ToolProcessQualificationEvidence
+            do {
+                let data = try Data(contentsOf: url)
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                record = try decoder.decode(ToolProcessQualificationEvidence.self, from: data)
+            } catch {
+                add(
+                    "QUALIFICATION_PROCESS_EVIDENCE_PARSE_FAILED",
+                    "Independent process qualification artifact could not be decoded: \(error.localizedDescription)",
+                    artifact.path,
+                    true
+                )
+                continue
+            }
+
+            guard record.isQualified(
+                at: currentDate,
+                requirePDKScope: policy.requiredQualificationScope.isCompleteForPDK
+            ) else {
+                add(
+                    "QUALIFICATION_PROCESS_EVIDENCE_INVALID",
+                    "Independent process qualification artifact is not qualified, independent, structurally valid, or fresh.",
+                    record.qualificationID,
+                    true
+                )
+                continue
+            }
+            guard record.scope == policy.requiredQualificationScope else {
+                add(
+                    "QUALIFICATION_PROCESS_SCOPE_MISMATCH",
+                    "Independent process qualification artifact scope does not match the release policy.",
+                    record.qualificationID,
+                    true
+                )
+                continue
+            }
+            guard let summary = approval.qualification,
+                  summary.qualificationID == record.qualificationID else {
+                add(
+                    "QUALIFICATION_PROCESS_IDENTITY_MISMATCH",
+                    "Production approval summary does not identify the independent process qualification artifact.",
+                    approval.evidenceID,
+                    true
+                )
+                continue
+            }
+            foundValidRecord = true
+            break
+        }
+
+        if !foundValidRecord {
+            add(
+                "QUALIFICATION_PROCESS_EVIDENCE_UNQUALIFIED",
+                "No fresh production approval contains a valid independent process qualification artifact.",
+                ToolEvidenceKind.productionApproval.rawValue,
+                true
+            )
         }
     }
 
@@ -377,19 +641,26 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
         status: XcircuiteEngineExecutionStatus,
         level: ToolQualificationLevel,
         digest: String?,
+        diagnostics: [XcircuiteEngineDiagnostic],
         laneResults: [ReleaseQualificationDomainResult],
         blockedLanes: Set<String>,
         failedLanes: Set<String>
     ) -> ReleaseQualificationPayload {
-        ReleaseQualificationPayload(
-            qualified: status == .completed
+        let qualified = status == .completed
                 && laneResults.count == request.policy.requiredLanes.count
                 && blockedLanes.isEmpty
-                && failedLanes.isEmpty,
+                && failedLanes.isEmpty
+        let promotionStatus = qualified
+            ? ReleaseQualificationPromotionStatus(rawValue: level.rawValue) ?? .blocked
+            : .blocked
+        return ReleaseQualificationPayload(
+            qualified: qualified,
             processProfileID: request.processProfileID,
             qualificationLevel: level,
             qualificationScope: request.policy.requiredQualificationScope,
             qualificationDigest: digest,
+            promotionStatus: promotionStatus,
+            promotionFailureCodes: diagnostics.map(\.code).sorted(),
             laneResults: laneResults.sorted { $0.laneID < $1.laneID },
             blockedLanes: blockedLanes.sorted(),
             failedLanes: failedLanes.sorted()
@@ -404,6 +675,7 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
         uniqueArtifacts(
             request.inputs
                 + [request.suiteArtifact, request.qualificationReportArtifact]
+                + request.corpusSpecArtifacts
                 + request.domainReportArtifacts
                 + request.evidenceArtifacts
         )

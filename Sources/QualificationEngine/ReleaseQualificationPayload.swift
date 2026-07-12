@@ -11,6 +11,8 @@ public struct ReleaseQualificationPayload: Sendable, Hashable, Codable {
     public var qualificationLevel: ToolQualificationLevel
     public var qualificationScope: ToolQualificationScope?
     public var qualificationDigest: String?
+    public var promotionStatus: ReleaseQualificationPromotionStatus
+    public var promotionFailureCodes: [String]
     public var laneResults: [ReleaseQualificationDomainResult]
     public var blockedLanes: [String]
     public var failedLanes: [String]
@@ -21,6 +23,8 @@ public struct ReleaseQualificationPayload: Sendable, Hashable, Codable {
         qualificationLevel: ToolQualificationLevel,
         qualificationScope: ToolQualificationScope?,
         qualificationDigest: String?,
+        promotionStatus: ReleaseQualificationPromotionStatus = .blocked,
+        promotionFailureCodes: [String] = [],
         laneResults: [ReleaseQualificationDomainResult] = [],
         blockedLanes: [String] = [],
         failedLanes: [String] = [],
@@ -32,6 +36,8 @@ public struct ReleaseQualificationPayload: Sendable, Hashable, Codable {
         self.qualificationLevel = qualificationLevel
         self.qualificationScope = qualificationScope
         self.qualificationDigest = qualificationDigest
+        self.promotionStatus = promotionStatus
+        self.promotionFailureCodes = promotionFailureCodes
         self.laneResults = laneResults
         self.blockedLanes = blockedLanes
         self.failedLanes = failedLanes

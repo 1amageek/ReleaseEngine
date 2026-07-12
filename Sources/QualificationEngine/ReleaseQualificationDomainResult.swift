@@ -15,6 +15,7 @@ public struct ReleaseQualificationDomainResult: Sendable, Hashable, Codable {
     public var oracleAgreementRate: Double?
     public var durationBudgetPassRate: Double?
     public var failureCodes: [String]
+    public var corpusArtifact: XcircuiteFileReference?
     public var reportArtifact: XcircuiteFileReference?
     public var evidenceArtifact: XcircuiteFileReference?
 
@@ -31,6 +32,7 @@ public struct ReleaseQualificationDomainResult: Sendable, Hashable, Codable {
         oracleAgreementRate: Double?,
         durationBudgetPassRate: Double?,
         failureCodes: [String] = [],
+        corpusArtifact: XcircuiteFileReference? = nil,
         reportArtifact: XcircuiteFileReference? = nil,
         evidenceArtifact: XcircuiteFileReference? = nil
     ) {
@@ -46,6 +48,7 @@ public struct ReleaseQualificationDomainResult: Sendable, Hashable, Codable {
         self.oracleAgreementRate = oracleAgreementRate
         self.durationBudgetPassRate = durationBudgetPassRate
         self.failureCodes = failureCodes
+        self.corpusArtifact = corpusArtifact
         self.reportArtifact = reportArtifact
         self.evidenceArtifact = evidenceArtifact
     }

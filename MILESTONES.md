@@ -53,28 +53,51 @@ M2 boundary:
 
 ## M3 — Reference oracle correlation
 
-Status: pending.
+Status: complete for the structured oracle-correlation contract.
 
-Exit evidence:
+Contract requirements:
 
 - Each required oracle lane identifies its backend, corpus, probe and report artifact.
 - Native and external lane case IDs/coverage tags are comparable.
 - Agreement, mismatch and oracle-unavailable states are retained per domain.
 - No oracle agreement is inferred from native pass rate.
 
+Exit evidence:
+
+- Required external lanes identify backend, corpus specification, report and probes.
+- Native and oracle case IDs, domains, coverage tags, probe IDs, statuses and explicit agreement are correlated one-to-one.
+- Case-set mismatch, coverage mismatch, probe mismatch, unavailable oracle and disagreement produce typed fail-closed diagnostics.
+- `RetainedQualificationTests` covers passing correlation, case disagreement and case-set mismatch.
+
+M3 boundary:
+
+- ReleaseEngine consumes structured oracle evidence; it does not invoke an external geometry or signoff binary.
+- Backend execution and oracle artifact production remain owned by the Xcircuite/tool integration layer.
+
 ## M4 — Process-scoped qualification and promotion
 
-Status: pending.
+Status: complete for the process-scoped promotion contract.
 
-Exit evidence:
+Contract requirements:
 
 - `ToolQualificationScope` matches implementation, binary, algorithm, process and deck digests.
 - Promotion to `oracleChecked` or `productionEligible` requires the corresponding retained evidence kinds and freshness.
 - Scope mismatch, stale evidence and future timestamps block promotion.
 
+Exit evidence:
+
+- Fresh, scope-matching failed evidence is reported as a failed qualification lane; missing or unscoped evidence remains blocked.
+- Production promotion requires an explicit qualified production-approval evidence item.
+- Promotion status and failure codes are persisted in `ReleaseQualificationPayload`.
+- `RetainedQualificationTests` covers oracle-checked and production-eligible promotion paths.
+
+M4 boundary:
+
+- Process promotion is a deterministic evaluation of supplied evidence. It is not foundry approval and does not manufacture production evidence.
+
 ## M5 — Retention CI and release envelope
 
-Status: pending.
+Status: partially complete.
 
 Exit evidence:
 
@@ -82,20 +105,32 @@ Exit evidence:
 - Missing, short-retention, stale or non-append-only history blocks the release envelope.
 - DesignFlowKernel owns the envelope builder; ReleaseEngine supplies typed qualification evidence.
 
+Current evidence:
+
+- DesignFlowKernel validates a hash-chained JSONL qualification history, source dashboard digest, append-only advancement and minimum retention window.
+- `design-flow build-retention-index` persists `qualification/retention-index.json` and registers `qualification-retention-index` in the run manifest.
+- `design-flow validate-retention-index` exposes the same validation contract to Agent and CI callers.
+- Release envelopes consume and content-validate both the raw ReleaseEngine qualification result and the retention index.
+
+Remaining exit evidence:
+
+- A repository-owned CI workflow must execute the retention build/validation commands against the retained corpus and publish the resulting run artifacts.
+- CI artifact upload and retention policy configuration must be verified in the target hosting environment.
+
 ## M6 — Xcircuite headless flow and human approval/resume
 
-Status: partially complete.
+Status: complete for the qualification-stage approval/resume path.
 
 Current evidence:
 
 - Release signoff and tapeout stage adapters load project-relative requests, persist raw envelopes and map typed status/gates.
 - The qualification stage adapter loads a project-relative qualification request, injects the flow project root, persists the raw envelope, and maps `payload.qualified` to the release gate.
+- The qualification adapter participates in the shared run ledger approval gate; an approved `release.qualification` stage resumes with the same run ID and registered result artifact.
 
-Remaining exit evidence:
+Remaining hardening evidence:
 
-- Qualification stage adapter is persisted in the same run ledger.
-- Approval, waiver, rejection and resume actions preserve the same bundle, scope and artifact lineage.
-- A headless run can stop at a blocked/approval gate and resume without rebuilding unrelated evidence.
+- Multi-stage signoff → qualification → tapeout lineage and explicit waiver/rejection policy still need a release-profile integration fixture.
+- The shared kernel approval/resume contract is covered; the complete profile-level release packet remains an M7 concern.
 
 ## M7 — Release-profile eligibility
 

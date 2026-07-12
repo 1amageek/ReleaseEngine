@@ -40,6 +40,7 @@ public struct RetainedCorpusReport: Sendable, Hashable, Codable {
         public var report: ArtifactIdentity?
         public var toolEvidence: ToolEvidenceObservation?
         public var toolEvidenceExport: ArtifactIdentity?
+        public var caseResults: [RetainedCorpusCaseResult]
 
         public init(
             domain: String,
@@ -53,7 +54,8 @@ public struct RetainedCorpusReport: Sendable, Hashable, Codable {
             durationBudgetPassRate: Double?,
             report: ArtifactIdentity?,
             toolEvidence: ToolEvidenceObservation?,
-            toolEvidenceExport: ArtifactIdentity?
+            toolEvidenceExport: ArtifactIdentity?,
+            caseResults: [RetainedCorpusCaseResult] = []
         ) {
             self.domain = domain
             self.status = status
@@ -67,6 +69,40 @@ public struct RetainedCorpusReport: Sendable, Hashable, Codable {
             self.report = report
             self.toolEvidence = toolEvidence
             self.toolEvidenceExport = toolEvidenceExport
+            self.caseResults = caseResults
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case domain
+            case status
+            case qualified
+            case caseCount
+            case coverageTagCount
+            case coveredRequiredCoverageTagCount
+            case passRate
+            case oracleAgreementRate
+            case durationBudgetPassRate
+            case report
+            case toolEvidence
+            case toolEvidenceExport
+            case caseResults
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.domain = try container.decode(String.self, forKey: .domain)
+            self.status = try container.decodeIfPresent(String.self, forKey: .status)
+            self.qualified = try container.decode(Bool.self, forKey: .qualified)
+            self.caseCount = try container.decodeIfPresent(Int.self, forKey: .caseCount)
+            self.coverageTagCount = try container.decodeIfPresent(Int.self, forKey: .coverageTagCount)
+            self.coveredRequiredCoverageTagCount = try container.decodeIfPresent(Int.self, forKey: .coveredRequiredCoverageTagCount)
+            self.passRate = try container.decodeIfPresent(Double.self, forKey: .passRate)
+            self.oracleAgreementRate = try container.decodeIfPresent(Double.self, forKey: .oracleAgreementRate)
+            self.durationBudgetPassRate = try container.decodeIfPresent(Double.self, forKey: .durationBudgetPassRate)
+            self.report = try container.decodeIfPresent(ArtifactIdentity.self, forKey: .report)
+            self.toolEvidence = try container.decodeIfPresent(ToolEvidenceObservation.self, forKey: .toolEvidence)
+            self.toolEvidenceExport = try container.decodeIfPresent(ArtifactIdentity.self, forKey: .toolEvidenceExport)
+            self.caseResults = try container.decodeIfPresent([RetainedCorpusCaseResult].self, forKey: .caseResults) ?? []
         }
     }
 
@@ -84,6 +120,7 @@ public struct RetainedCorpusReport: Sendable, Hashable, Codable {
         public var report: ArtifactIdentity?
         public var toolEvidence: ToolEvidenceObservation?
         public var toolEvidenceExport: ArtifactIdentity?
+        public var caseResults: [RetainedOracleCaseResult]
 
         public init(
             domain: String,
@@ -98,7 +135,8 @@ public struct RetainedCorpusReport: Sendable, Hashable, Codable {
             durationBudgetPassRate: Double?,
             report: ArtifactIdentity?,
             toolEvidence: ToolEvidenceObservation?,
-            toolEvidenceExport: ArtifactIdentity?
+            toolEvidenceExport: ArtifactIdentity?,
+            caseResults: [RetainedOracleCaseResult] = []
         ) {
             self.domain = domain
             self.oracleBackendID = oracleBackendID
@@ -113,6 +151,42 @@ public struct RetainedCorpusReport: Sendable, Hashable, Codable {
             self.report = report
             self.toolEvidence = toolEvidence
             self.toolEvidenceExport = toolEvidenceExport
+            self.caseResults = caseResults
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case domain
+            case oracleBackendID
+            case status
+            case qualified
+            case caseCount
+            case coverageTagCount
+            case coveredRequiredCoverageTagCount
+            case passRate
+            case oracleAgreementRate
+            case durationBudgetPassRate
+            case report
+            case toolEvidence
+            case toolEvidenceExport
+            case caseResults
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.domain = try container.decode(String.self, forKey: .domain)
+            self.oracleBackendID = try container.decodeIfPresent(String.self, forKey: .oracleBackendID)
+            self.status = try container.decodeIfPresent(String.self, forKey: .status)
+            self.qualified = try container.decode(Bool.self, forKey: .qualified)
+            self.caseCount = try container.decodeIfPresent(Int.self, forKey: .caseCount)
+            self.coverageTagCount = try container.decodeIfPresent(Int.self, forKey: .coverageTagCount)
+            self.coveredRequiredCoverageTagCount = try container.decodeIfPresent(Int.self, forKey: .coveredRequiredCoverageTagCount)
+            self.passRate = try container.decodeIfPresent(Double.self, forKey: .passRate)
+            self.oracleAgreementRate = try container.decodeIfPresent(Double.self, forKey: .oracleAgreementRate)
+            self.durationBudgetPassRate = try container.decodeIfPresent(Double.self, forKey: .durationBudgetPassRate)
+            self.report = try container.decodeIfPresent(ArtifactIdentity.self, forKey: .report)
+            self.toolEvidence = try container.decodeIfPresent(ToolEvidenceObservation.self, forKey: .toolEvidence)
+            self.toolEvidenceExport = try container.decodeIfPresent(ArtifactIdentity.self, forKey: .toolEvidenceExport)
+            self.caseResults = try container.decodeIfPresent([RetainedOracleCaseResult].self, forKey: .caseResults) ?? []
         }
     }
 
@@ -141,6 +215,14 @@ public struct RetainedCorpusReport: Sendable, Hashable, Codable {
         schemaVersion == Self.currentSchemaVersion
             && Set(domainResults.map { $0.domain }).count == domainResults.count
             && Set(externalOracleResults.map { $0.domain + "\u{1F}" + ($0.oracleBackendID ?? "") }).count == externalOracleResults.count
+            && domainResults.allSatisfy { result in
+                result.caseResults.allSatisfy { $0.isValid }
+                    && Set(result.caseResults.map { $0.domain + "\u{1F}" + $0.caseID }).count == result.caseResults.count
+            }
+            && externalOracleResults.allSatisfy { result in
+                result.caseResults.allSatisfy { $0.isValid }
+                    && Set(result.caseResults.map { $0.domain + "\u{1F}" + $0.caseID }).count == result.caseResults.count
+            }
     }
 
     private enum CodingKeys: String, CodingKey {

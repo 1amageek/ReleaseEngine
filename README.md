@@ -6,7 +6,7 @@ Fail-closed multi-axis signoff and immutable tapeout release contracts.
 
 This repository provides native, fail-closed release contract engines. It does not invoke a foundry tool or infer process qualification; qualification evidence is an explicit input and missing or stale semantics remain blocked.
 
-The current implementation closes the native release-contract path and retained-corpus qualification input. Full release readiness still requires an external oracle/process qualification lane, retained regression automation, and human approval/resume integration; the remaining exit criteria are tracked in [`MILESTONES.md`](MILESTONES.md).
+The current implementation closes the native release-contract path, structured native/oracle case correlation, process-scoped promotion evaluation, and the Xcircuite qualification-stage approval/resume path. Full release-profile readiness still requires CI-hosted retention publication and final process/foundry approval; the remaining exit criteria are tracked in [`MILESTONES.md`](MILESTONES.md).
 
 ## Products
 
@@ -15,7 +15,7 @@ The current implementation closes the native release-contract path and retained-
 | `ReleaseCore` | Signoff and tapeout references |
 | `SignoffEngine` | Required-axis applicability and verdict |
 | `TapeoutEngine` | Stream-out validation, exact-stream XOR and foundry handoff |
-| `QualificationEngine` | Retained corpus lane evaluation and process-scoped qualification input |
+| `QualificationEngine` | Retained corpus lane evaluation, case-level oracle correlation, and process-scoped promotion |
 | `ReleaseEngine` | Umbrella API |
 
 ## Implemented behavior
@@ -28,6 +28,8 @@ The current implementation closes the native release-contract path and retained-
 - GDSII/OASIS stream-out manifest validation, top-cell/units/layer/hierarchy/seal/pad checks, exact-stream comparison, and deterministic foundry handoff manifest checksums.
 - Deterministic JSON CLI with non-zero exit codes for blocked and failed decisions.
 - Retained-corpus qualification evaluation with artifact integrity, freshness, coverage, metric, oracle-lane and process-scope gates.
+- Case-level native/oracle correlation with explicit agreement, backend/corpus/probe binding, and fail-closed mismatch diagnostics.
+- Explicit promotion status (`corpusChecked`, `oracleChecked`, `productionEligible`) with production-approval evidence gating.
 
 The exact-stream comparator intentionally does not claim geometric XOR equivalence when a qualified geometry backend is unavailable. Such a case remains failed or blocked according to the release requirement.
 
@@ -77,6 +79,17 @@ cd Fixtures/Qualification/positive
 ```
 
 The command exits successfully only when the request, retained corpus, report, artifact references, freshness windows, process scope and oracle agreement satisfy the fail-closed policy.
+
+For the complete flow, DesignFlowKernel persists the qualification result under
+`.xcircuite/runs/<run-id>/stages/release.qualification/raw/result.json`, builds a
+hash-chained retention index, and consumes both artifacts when it builds the
+release envelope. The developer/Agent-facing retention commands are:
+
+```bash
+design-flow build-retention-index --project-root <path> --run-id <id> --workflow-run-id <id> --source-dashboard <path> --history <path> --previous-entry-count <n> --retention-days <n> --minimum-retention-days <n>
+design-flow validate-retention-index --project-root <path> --run-id <id>
+design-flow build-release-envelope --project-root <path> --run-id <id>
+```
 
 See `DESIGN.md`, `INTERFACES.md` and `IMPLEMENTATION_PLAN.md` for the responsibility boundary and extension points.
 

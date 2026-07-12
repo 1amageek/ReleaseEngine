@@ -17,15 +17,16 @@ let package = Package(
         .package(path: "../PDKKit"),
         .package(path: "../ToolQualification"),
         .package(path: "../PhysicalDesignEngine"),
+        .package(path: "../LogicDesign"),
     ],
     targets: [
         .target(
             name: "ReleaseCore",
-            dependencies: [.product(name: "XcircuitePackage", package: "XcircuitePackage"), .product(name: "PDKCore", package: "PDKKit"), .product(name: "ToolQualification", package: "ToolQualification"), .product(name: "PhysicalDesignCore", package: "PhysicalDesignEngine")]
+            dependencies: [.product(name: "XcircuitePackage", package: "XcircuitePackage"), .product(name: "PDKCore", package: "PDKKit"), .product(name: "ToolQualification", package: "ToolQualification"), .product(name: "PhysicalDesignCore", package: "PhysicalDesignEngine"), .product(name: "LogicIR", package: "LogicDesign")]
         ),
         .target(
             name: "SignoffEngine",
-            dependencies: [.product(name: "XcircuitePackage", package: "XcircuitePackage"), "ReleaseCore"]
+            dependencies: [.product(name: "XcircuitePackage", package: "XcircuitePackage"), "ReleaseCore", .product(name: "LogicIR", package: "LogicDesign")]
         ),
         .target(
             name: "TapeoutEngine",
@@ -35,6 +36,7 @@ let package = Package(
             name: "QualificationEngine",
             dependencies: [
                 .product(name: "XcircuitePackage", package: "XcircuitePackage"),
+                .product(name: "LogicIR", package: "LogicDesign"),
                 .product(name: "ToolQualification", package: "ToolQualification"),
                 "ReleaseCore",
             ]

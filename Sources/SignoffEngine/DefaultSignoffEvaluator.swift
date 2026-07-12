@@ -1,4 +1,5 @@
 import Foundation
+import LogicIR
 import ReleaseCore
 import ToolQualification
 import XcircuitePackage
@@ -68,6 +69,20 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                 entity: request.profileID
             ))
         }
+
+        let provenanceIssues = LogicDesignProvenanceValidation.issues(
+            for: request.designDigest,
+            provenance: request.designProvenance
+        )
+        diagnostics.append(contentsOf: provenanceIssues
+            .filter { $0.code != "design_digest_missing" }
+            .map { issue in
+                diagnostic(
+                    issue.diagnosticCode,
+                    issue.message,
+                    entity: request.runID
+                )
+            })
 
         let evidenceValidation = evidenceValidator.validate(
             evidence: request.evidenceRecords,
@@ -189,7 +204,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
         let blockedAxes = axisResults
             .filter { $0.disposition == .blocked }
             .map(\.axis.rawValue)
-            .sorted()
+            .sorted() + (provenanceIssues.isEmpty ? [] : ["provenance"])
         var status: XcircuiteEngineExecutionStatus = .completed
         if !blockedAxes.isEmpty || !diagnostics.filter({ $0.severity == .error }).isEmpty {
             status = .blocked
@@ -262,9 +277,10 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             let issuedAt = now()
             let evidenceDigest = makeEvidenceDigest(request.evidenceRecords)
             let unsignedBundle = SignoffBundle(
-                bundleID: "(request.runID)-signoff",
+                bundleID: "\(request.runID)-signoff",
                 profileID: profile.profileID,
                 designDigest: request.designDigest,
+                designProvenance: request.designProvenance,
                 pdkDigest: request.pdkDigest,
                 finalLayoutDigest: finalLayoutDigest,
                 axisResults: axisResults,
@@ -277,6 +293,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                 bundleID: unsignedBundle.bundleID,
                 profileID: unsignedBundle.profileID,
                 designDigest: unsignedBundle.designDigest,
+                designProvenance: unsignedBundle.designProvenance,
                 pdkDigest: unsignedBundle.pdkDigest,
                 finalLayoutDigest: unsignedBundle.finalLayoutDigest,
                 axisResults: unsignedBundle.axisResults,
@@ -288,6 +305,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             bundleReference = SignoffBundleReference(
                 artifact: bundleArtifact,
                 designDigest: request.designDigest,
+                designProvenance: request.designProvenance,
                 pdkDigest: request.pdkDigest,
                 finalLayoutDigest: finalLayoutDigest,
                 bundleDigest: bundle.approvalDigest,

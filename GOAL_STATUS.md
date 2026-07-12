@@ -2,7 +2,7 @@
 
 ## Current state
 
-**Native contract path and retained-corpus qualification input are implemented. External oracle correlation, process promotion, human approval, and release-envelope eligibility remain explicit integration milestones.**
+**Native contract path, structured oracle correlation, process-scoped promotion, and qualification-stage approval/resume are implemented. CI-hosted retention publication and final release-profile eligibility remain explicit integration milestones.**
 
 | Maturity gate | Status | Evidence |
 |---|---|---|
@@ -14,10 +14,10 @@
 | Domain implementation | Complete for native contract path | DefaultSignoffEvaluator and DefaultTapeoutPackaging |
 | CLI implementation | Complete for native and retained qualification paths | `release-engine profile/signoff/tapeout/qualify` |
 | Fixture corpus | Retained qualification regression corpus | ReleaseEngineBehaviorTests, RetainedQualificationTests and Fixtures |
-| Oracle correlation | Not claimed | Requires external/reference geometry oracle |
-| Process qualification | Not claimed | Requires PDK-scoped retained qualification evidence |
+| Oracle correlation | Implemented for structured evidence | ReleaseEngine correlates supplied native/oracle case results; backend execution remains external |
+| Process qualification | Promotion contract implemented | Requires fresh PDK-scoped evidence and explicit production approval |
 | Xcircuite stage adapter | Implemented for signoff, tapeout and qualification | Release stage executors and persisted raw envelopes |
-| End-to-end flow evidence | Native + qualification input path complete | ReleaseEngine qualification suite and Xcircuite release adapter suite |
+| End-to-end flow evidence | Native + qualification + approval/resume path complete | ReleaseEngine qualification suite, DesignFlowKernel retention/envelope suite, Xcircuite release adapter suite |
 | Release readiness | Blocked by qualification policy | No process/foundry approval is inferred |
 
 ## Function status
@@ -60,7 +60,8 @@ The package goal is complete only when every P0 function has a concrete backend,
 ## Current blockers
 
 - No external-tool invocation is bundled; native engines consume structured evidence.
-- No external oracle correlation or production process qualification is claimed.
-- Xcircuite remains responsible for flow approval and resume policy; release stage adapters persist raw envelopes and map typed status/gates.
+- External oracle execution and production process qualification are not manufactured by this package.
+- CI-hosted retention publication and final release-profile integration remain open.
+- Xcircuite remains responsible for external backend execution and flow orchestration; release stage adapters persist raw envelopes and map typed status/gates.
 
 This file must be updated by implementation agents whenever a maturity gate changes. A source file or type name alone is never evidence of implementation or qualification.

@@ -17,9 +17,19 @@ The package implements deterministic, protocol-first release decisions for:
 
 ## Qualification boundary
 
-The package does not claim that a native implementation is qualified for a foundry process. A release is eligible only when the request carries the required process-scoped tool qualification evidence. `QualificationEngine` now validates retained corpus suite/report artifacts, freshness, integrity, lane coverage, thresholds, and `ToolQualificationScope` with fail-closed typed diagnostics. External-tool invocation, corpus retention policy, oracle correlation, process approval, human approval, and resume policy remain owned by the Xcircuite/ToolQualification integration layer. Xcircuite provides release signoff, tapeout, and qualification stage adapters that load project-relative requests, inject the flow project root, persist raw envelopes, and map typed status and gates.
+The package does not claim that a native implementation is qualified for a foundry process. A release is eligible only when the request carries the required process-scoped tool qualification evidence. `QualificationEngine` validates retained corpus suite/report artifacts, freshness, integrity, lane coverage, thresholds, `ToolQualificationScope`, and case-level native/oracle correlation with fail-closed typed diagnostics. It emits explicit `corpusChecked`, `oracleChecked`, and `productionEligible` promotion states; production promotion requires qualified production-approval evidence. External-tool invocation, corpus retention publication, process approval, human approval, and resume policy remain owned by the Xcircuite/ToolQualification/DesignFlowKernel integration layer. Xcircuite provides release signoff, tapeout, and qualification stage adapters that load project-relative requests, inject the flow project root, persist raw envelopes, and map typed status and gates.
 
 The exact-stream comparator is deliberately not a geometric XOR oracle. A different byte encoding is not treated as equivalent without a qualified geometry comparator.
+
+## Structured oracle contract
+
+An external lane must identify its backend, corpus specification artifact, report artifact, and required probes. The retained suite declares the case IDs, domains, coverage tags, and probes. The native and oracle reports must return the same case set and explicitly state per-case agreement. Aggregate pass rates cannot substitute for case-level agreement.
+
+The evaluator blocks or fails with typed diagnostics for unavailable oracle output, case-set drift, coverage/probe drift, status mismatch, and explicit disagreement. This makes the contract suitable for an external backend while keeping ReleaseEngine deterministic and local.
+
+## Promotion contract
+
+Promotion is evaluated per request and scope. A fresh, scope-matching oracle lane can promote a process to `oracleChecked`. `productionEligible` additionally requires fresh qualified `productionApproval` evidence. The resulting promotion status and failure codes are persisted in `ReleaseQualificationPayload`; no foundry or human decision is inferred from a native pass.
 
 ## Reproduction
 

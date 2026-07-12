@@ -24,11 +24,13 @@ public struct RetainedCorpusSuite: Sendable, Hashable, Codable {
     public var createdAt: String?
     public var sourceDashboardPath: String?
     public var lanes: [ReleaseQualificationLane]
+    public var cases: [RetainedCorpusCase]
     public var requirements: Requirements?
 
     public init(
         suiteID: String,
         lanes: [ReleaseQualificationLane],
+        cases: [RetainedCorpusCase] = [],
         createdAt: String? = nil,
         sourceDashboardPath: String? = nil,
         requirements: Requirements? = nil,
@@ -39,6 +41,7 @@ public struct RetainedCorpusSuite: Sendable, Hashable, Codable {
         self.createdAt = createdAt
         self.sourceDashboardPath = sourceDashboardPath
         self.lanes = lanes
+        self.cases = cases
         self.requirements = requirements
     }
 
@@ -48,6 +51,9 @@ public struct RetainedCorpusSuite: Sendable, Hashable, Codable {
             && !lanes.isEmpty
             && Set(lanes.map { $0.laneID }).count == lanes.count
             && lanes.allSatisfy { $0.isValid }
+            && cases.allSatisfy { $0.isValid }
+            && Set(cases.map { $0.domain + "\u{1F}" + $0.caseID }).count == cases.count
+            && cases.allSatisfy { caseItem in lanes.contains { $0.domain == caseItem.domain } }
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -56,6 +62,7 @@ public struct RetainedCorpusSuite: Sendable, Hashable, Codable {
         case createdAt
         case sourceDashboardPath
         case lanes
+        case cases
         case requirements
     }
 
@@ -66,6 +73,7 @@ public struct RetainedCorpusSuite: Sendable, Hashable, Codable {
         createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
         sourceDashboardPath = try container.decodeIfPresent(String.self, forKey: .sourceDashboardPath)
         lanes = try container.decode([ReleaseQualificationLane].self, forKey: .lanes)
+        cases = try container.decodeIfPresent([RetainedCorpusCase].self, forKey: .cases) ?? []
         requirements = try container.decodeIfPresent(Requirements.self, forKey: .requirements)
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import LogicIR
 import XcircuitePackage
 
 public struct SignoffBundle: Sendable, Hashable, Codable {
@@ -8,6 +9,7 @@ public struct SignoffBundle: Sendable, Hashable, Codable {
     public var bundleID: String
     public var profileID: String
     public var designDigest: String
+    public var designProvenance: LogicDesignProvenance?
     public var pdkDigest: String
     public var finalLayoutDigest: String
     public var axisResults: [SignoffAxisResult]
@@ -20,6 +22,7 @@ public struct SignoffBundle: Sendable, Hashable, Codable {
         bundleID: String,
         profileID: String,
         designDigest: String,
+        designProvenance: LogicDesignProvenance? = nil,
         pdkDigest: String,
         finalLayoutDigest: String,
         axisResults: [SignoffAxisResult],
@@ -33,6 +36,7 @@ public struct SignoffBundle: Sendable, Hashable, Codable {
         self.bundleID = bundleID
         self.profileID = profileID
         self.designDigest = designDigest
+        self.designProvenance = designProvenance
         self.pdkDigest = pdkDigest
         self.finalLayoutDigest = finalLayoutDigest
         self.axisResults = axisResults
@@ -79,6 +83,7 @@ public struct SignoffBundle: Sendable, Hashable, Codable {
             bundleID,
             profileID,
             designDigest,
+            designProvenance?.canonicalMaterial ?? "",
             pdkDigest,
             finalLayoutDigest,
             evidenceDigest,

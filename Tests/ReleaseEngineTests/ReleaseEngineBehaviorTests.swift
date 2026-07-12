@@ -1,4 +1,5 @@
 import Foundation
+import LogicIR
 import PDKCore
 import PhysicalDesignCore
 import ReleaseCore
@@ -40,6 +41,31 @@ struct ReleaseEngineBehaviorTests {
         #expect(result.status == .blocked)
         #expect(result.payload.approved == false)
         #expect(result.diagnostics.contains { $0.code == "EVIDENCE_RECORDS_REQUIRED" })
+    }
+
+    @Test("signoff blocks an invalid design lineage before approval")
+    func invalidDesignProvenanceBlocks() async throws {
+        let request = SignoffRequest(
+            runID: "invalid-design-provenance",
+            inputs: [],
+            profileID: "digital",
+            designDigest: Self.designDigest,
+            designProvenance: LogicDesignProvenance(
+                sourceDesignDigest: Self.designDigest,
+                inputDesignDigest: String(repeating: "9", count: 64),
+                transformationID: "mapped",
+                producerID: "test-producer",
+                producerVersion: "1.0.0"
+            ),
+            pdkDigest: Self.pdkDigest,
+            evidence: []
+        )
+
+        let result = try await DefaultSignoffEvaluator().execute(request)
+
+        #expect(result.status == .blocked)
+        #expect(result.diagnostics.contains { $0.code == "DESIGN_PROVENANCE_INPUT_DIGEST_MISMATCH" })
+        #expect(result.payload.blockedAxes.contains("provenance"))
     }
 
     @Test("signoff approves a complete, integrity-verified evidence set")
@@ -273,7 +299,7 @@ struct ReleaseEngineBehaviorTests {
     }
 
     private static func makeTemporaryRoot(named name: String) throws -> URL {
-        let root = FileManager.default.temporaryDirectory.appending(path: "release-engine-(name)-\(UUID().uuidString)")
+        let root = FileManager.default.temporaryDirectory.appending(path: "release-engine-\(name)-\(UUID().uuidString)")
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         } catch {
