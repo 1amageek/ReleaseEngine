@@ -20,6 +20,7 @@ public struct ReleaseProfileStageEvidence: Sendable, Hashable, Codable {
     public var qualificationLevel: ToolQualificationLevel?
     public var promotionStatus: ReleaseQualificationPromotionStatus?
     public var qualificationDigest: String?
+    public var qualificationScope: ToolQualificationScope?
 
     public init(
         stageID: String,
@@ -35,6 +36,7 @@ public struct ReleaseProfileStageEvidence: Sendable, Hashable, Codable {
         qualificationLevel: ToolQualificationLevel? = nil,
         promotionStatus: ReleaseQualificationPromotionStatus? = nil,
         qualificationDigest: String? = nil,
+        qualificationScope: ToolQualificationScope? = nil,
         schemaVersion: Int = Self.currentSchemaVersion
     ) {
         self.schemaVersion = schemaVersion
@@ -51,5 +53,6 @@ public struct ReleaseProfileStageEvidence: Sendable, Hashable, Codable {
         self.qualificationLevel = qualificationLevel
         self.promotionStatus = promotionStatus
         self.qualificationDigest = qualificationDigest
+        self.qualificationScope = qualificationScope
     }
 }

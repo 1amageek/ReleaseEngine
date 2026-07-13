@@ -67,6 +67,26 @@ public struct DefaultReleaseProfileEligibilityEvaluator: ReleaseProfileEligibili
         if request.qualification.qualified == false {
             add("release-profile-qualification-not-qualified")
         }
+        if request.requiredQualificationLevel >= .oracleChecked {
+            if let requiredScope = request.requiredQualificationScope {
+                if !requiredScope.isComplete || request.qualification.qualificationScope?.isComplete != true {
+                    add("release-profile-qualification-scope-incomplete")
+                } else if request.requiredQualificationLevel >= .productionEligible
+                    && (!requiredScope.isCompleteForPDK
+                        || request.qualification.qualificationScope?.isCompleteForPDK != true) {
+                    add("release-profile-qualification-pdk-scope-incomplete")
+                } else {
+                    if request.qualification.qualificationScope != requiredScope {
+                        add("release-profile-qualification-scope-mismatch")
+                    }
+                    if requiredScope.processProfileID != request.processProfileID {
+                        add("release-profile-qualification-scope-process-mismatch")
+                    }
+                }
+            } else {
+                add("release-profile-qualification-scope-missing")
+            }
+        }
         if let qualificationDigest = request.qualification.qualificationDigest {
             if !isSHA256(qualificationDigest) {
                 add("release-profile-qualification-digest-invalid")

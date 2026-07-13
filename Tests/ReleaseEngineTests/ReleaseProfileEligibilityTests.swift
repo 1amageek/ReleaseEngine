@@ -51,6 +51,49 @@ struct ReleaseProfileEligibilityTests {
         #expect(envelope.payload.failureCodes.contains("release-profile-approval-decision-packet-mismatch"))
     }
 
+    @Test("production qualification requires an exact process qualification scope")
+    func qualificationScopeMismatchBlocksEligibility() async throws {
+        var request = makeRequest(
+            runID: "release-profile-scope-mismatch",
+            qualificationLevel: .productionEligible,
+            promotionStatus: .productionEligible,
+            reviewerKind: .human,
+            approvalPacketDigest: String(repeating: "d", count: 64)
+        )
+        request.qualification.qualificationScope?.deckDigest = String(repeating: "e", count: 64)
+
+        let envelope = try await DefaultReleaseProfileEligibilityEvaluator().execute(request)
+
+        #expect(envelope.status == .blocked)
+        #expect(envelope.payload.failureCodes.contains("release-profile-qualification-scope-mismatch"))
+    }
+
+    @Test("production qualification requires a PDK-bound scope")
+    func productionQualificationWithoutPDKScopeBlocksEligibility() async throws {
+        var request = makeRequest(
+            runID: "release-profile-pdk-scope-missing",
+            qualificationLevel: .productionEligible,
+            requiredQualificationLevel: .productionEligible,
+            promotionStatus: .productionEligible,
+            reviewerKind: .human,
+            approvalPacketDigest: String(repeating: "d", count: 64)
+        )
+        let requiredScope = ToolQualificationScope(
+            implementationID: "native.release.qualification",
+            binaryDigest: String(repeating: "3", count: 64),
+            algorithmVersion: "qualification-v1",
+            processProfileID: "sky130",
+            deckDigest: String(repeating: "4", count: 64)
+        )
+        request.requiredQualificationScope = requiredScope
+        request.qualification.qualificationScope = requiredScope
+
+        let envelope = try await DefaultReleaseProfileEligibilityEvaluator().execute(request)
+
+        #expect(envelope.status == .blocked)
+        #expect(envelope.payload.failureCodes.contains("release-profile-qualification-pdk-scope-incomplete"))
+    }
+
     @Test("eligibility request and result envelope round-trip deterministically")
     func codableRoundTrip() throws {
         let request = makeRequest(
@@ -100,6 +143,7 @@ struct ReleaseProfileEligibilityTests {
     private func makeRequest(
         runID: String,
         qualificationLevel: ToolQualificationLevel,
+        requiredQualificationLevel: ToolQualificationLevel = .oracleChecked,
         promotionStatus: ReleaseProfileRequiredPromotionStatus,
         reviewerKind: XcircuiteRunActionActor.Kind,
         approvalPacketDigest: String,
@@ -107,6 +151,15 @@ struct ReleaseProfileEligibilityTests {
     ) -> ReleaseProfileEligibilityRequest {
         let designDigest = String(repeating: "1", count: 64)
         let pdkDigest = String(repeating: "2", count: 64)
+        let qualificationScope = ToolQualificationScope(
+            implementationID: "native.release.qualification",
+            binaryDigest: String(repeating: "3", count: 64),
+            algorithmVersion: "qualification-v1",
+            processProfileID: "sky130",
+            deckDigest: String(repeating: "4", count: 64),
+            pdkID: "sky130A",
+            pdkDigest: pdkDigest
+        )
         let packet = artifact(id: "decision-packet", digest: approvalPacketDigest)
         let approval = XcircuiteApprovalRecord(
             runID: runID,
@@ -124,8 +177,9 @@ struct ReleaseProfileEligibilityTests {
             runID: runID,
             profileID: "digital",
             processProfileID: "sky130",
-            requiredQualificationLevel: .oracleChecked,
+            requiredQualificationLevel: requiredQualificationLevel,
             requiredPromotionStatus: .oracleChecked,
+            requiredQualificationScope: qualificationScope,
             signoff: ReleaseProfileStageEvidence(
                 stageID: "release.signoff",
                 runID: runID,
@@ -146,7 +200,8 @@ struct ReleaseProfileEligibilityTests {
                 qualified: true,
                 qualificationLevel: qualificationLevel,
                 promotionStatus: promotionStatus.qualificationValue,
-                qualificationDigest: String(repeating: "9", count: 64)
+                qualificationDigest: String(repeating: "9", count: 64),
+                qualificationScope: qualificationScope
             ),
             tapeout: ReleaseProfileStageEvidence(
                 stageID: "release.tapeout",

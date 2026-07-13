@@ -30,7 +30,7 @@ The current implementation closes the native release-contract path, structured n
 - Retained-corpus qualification evaluation with artifact integrity, freshness, coverage, metric, oracle-lane and process-scope gates.
 - Case-level native/oracle correlation with explicit agreement, backend/corpus/probe binding, and fail-closed mismatch diagnostics.
 - Explicit promotion status (`corpusChecked`, `oracleChecked`, `productionEligible`) with production-approval evidence gating.
-- Release-profile eligibility that correlates signoff, qualification and tapeout stage artifacts under one run ID, checks design/PDK binding, requires the configured qualification/promotion level, and binds a human approval to the final decision-packet digest.
+- Release-profile eligibility that correlates signoff, qualification and tapeout stage artifacts under one run ID, checks design/PDK binding, requires the configured qualification/promotion level and exact process qualification scope, and binds a human approval to the final decision-packet digest.
 
 The exact-stream comparator intentionally does not claim geometric XOR equivalence when a qualified geometry backend is unavailable. Such a case remains failed or blocked according to the release requirement.
 
@@ -66,7 +66,7 @@ swift run release-engine qualify --request qualification-request.json
 swift run release-engine eligibility --request release-profile-request.json
 ```
 
-`eligibility` emits a completed envelope only when signoff, qualification and tapeout are completed and approved, the qualification/promotion thresholds are met, all process and design digests agree, and a human approval references the final decision packet. Missing production evidence is a structured blocked result.
+`eligibility` emits a completed envelope only when signoff, qualification and tapeout are completed and approved, the qualification/promotion thresholds and exact process qualification scope are met, all process and design digests agree, and a human approval references the final decision packet. Missing or mismatched scope/production evidence is a structured blocked result.
 
 ## Test
 
