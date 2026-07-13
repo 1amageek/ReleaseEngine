@@ -8,6 +8,14 @@ This repository provides native, fail-closed release contract engines. It does n
 
 The current implementation closes the native release-contract path, structured native/oracle case correlation, process-scoped promotion evaluation, release-profile eligibility evaluation, and the Xcircuite headless approval/resume path. A release is still blocked unless CI retention evidence and final process/foundry approval are supplied; the remaining evidence criteria are tracked in [`MILESTONES.md`](MILESTONES.md).
 
+The canonical release-profile eligibility path also implements the
+`CircuiteFoundation.Engine` contract. It consumes `ArtifactReference` values,
+produces structured `DesignDiagnostic` values, and records an
+`ExecutionProvenance`/`EvidenceManifest` that binds the reviewed artifacts and
+human approval to the decision. The older Xcircuite request/envelope API is
+retained as a compatibility surface for existing flow adapters while stage
+requests migrate incrementally.
+
 ## Products
 
 | Product | Responsibility |
@@ -36,13 +44,25 @@ The exact-stream comparator intentionally does not claim geometric XOR equivalen
 
 ## Contract
 
-Every executing product uses:
+The Foundation release-profile API uses:
+
+- a `Sendable`, `Hashable`, `Codable` request containing canonical artifact references;
+- `FoundationReleaseProfileEligibilityEngine`, which refines `Engine<Request, Output>`;
+- a result conforming to `ArtifactProducing`, `DiagnosticReporting`, and `EvidenceProviding`;
+- typed `ContentDigest` and `ExecutionProvenance` values for release evidence;
+- explicit blocked and eligible states, with human approval bound to the decision-packet digest.
+
+The compatibility stage API still uses:
 
 - a `Codable`, `Hashable`, `Sendable` request conforming to `XcircuiteEngineRequest`;
 - `XcircuiteEngineResultEnvelope<Payload>` for status, diagnostics, artifacts and execution metadata;
 - protocol-first dependency injection;
 - immutable `XcircuiteFileReference` inputs and outputs;
 - explicit blocked, failed and cancelled states.
+
+This compatibility surface is an adapter boundary, not the canonical
+Foundation artifact model. New callers should use the Foundation release
+profile types and pass stage results as immutable `ArtifactReference` values.
 
 ## Xcircuite integration
 

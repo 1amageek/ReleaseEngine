@@ -13,6 +13,7 @@ let package = Package(
         .executable(name: "release-engine", targets: ["ReleaseEngineCLI"]),
     ],
     dependencies: [
+        .package(path: "../CircuiteFoundation"),
         .package(path: "../XcircuitePackage"),
         .package(path: "../PDKKit"),
         .package(path: "../ToolQualification"),
@@ -43,7 +44,13 @@ let package = Package(
         ),
         .target(
             name: "ReleaseEngine",
-            dependencies: ["ReleaseCore", "SignoffEngine", "TapeoutEngine", "QualificationEngine"]
+            dependencies: [
+                .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
+                "ReleaseCore",
+                "SignoffEngine",
+                "TapeoutEngine",
+                "QualificationEngine",
+            ]
         ),
         .executableTarget(
             name: "ReleaseEngineCLI",
@@ -57,6 +64,7 @@ let package = Package(
                 "TapeoutEngine",
                 "QualificationEngine",
                 "ReleaseEngine",
+                .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 .product(name: "PDKCore", package: "PDKKit"),
                 .product(name: "PhysicalDesignCore", package: "PhysicalDesignEngine"),
                 .product(name: "ToolQualification", package: "ToolQualification"),

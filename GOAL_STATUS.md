@@ -8,9 +8,10 @@
 |---|---|---|
 | Responsibility boundary | Complete | README.md and DESIGN.md |
 | Public package products | Implemented | Package.swift (`ReleaseCore`, `SignoffEngine`, `TapeoutEngine`, `QualificationEngine`) |
-| Shared Xcircuite request/result contract | Implemented | Public Swift requests, payloads, protocols and result envelopes |
+| Foundation release-profile contract | Implemented | `FoundationReleaseProfileEligibilityRequest`, `FoundationReleaseProfileEligibilityEngine`, and `FoundationReleaseProfileEligibilityResult` |
+| Shared Xcircuite request/result contract | Compatibility retained | Existing public requests, payloads, protocols and result envelopes remain for Xcircuite stage adapters |
 | Contract build | Passed | timeout-bounded `swift build` |
-| Contract test | Passed | timeout-bounded `swift test` suites; the package has no configured Xcode test action |
+| Contract test | Passed | timeout-bounded `swift test` passed 30 Swift Testing cases in 5 suites, including the Foundation eligibility suite; the package has no configured Xcode test action |
 | Domain implementation | Complete for native contract path | DefaultSignoffEvaluator and DefaultTapeoutPackaging |
 | CLI implementation | Complete for native, retained qualification and release-profile eligibility paths | `release-engine profile/signoff/tapeout/qualify/eligibility` |
 | Fixture corpus | Retained qualification regression corpus | ReleaseEngineBehaviorTests, RetainedQualificationTests and Fixtures |
@@ -63,6 +64,7 @@ The package goal is complete only when every P0 function has a concrete backend,
 - External oracle execution and production process qualification are not manufactured by this package.
 - Final process/foundry evidence remains external by design; a missing or stale approval keeps release-profile eligibility blocked.
 - `release-profile` is now a native and headless integration contract; it returns blocked until the supplied process-scoped evidence and human approval satisfy policy.
+- The Foundation release-profile path is now executable independently of the Xcircuite runtime; signoff, qualification, and tapeout request migration remains a compatibility-boundary milestone.
 - Xcircuite remains responsible for external backend execution and flow orchestration; release stage adapters persist raw envelopes and map typed status/gates.
 
 This file must be updated by implementation agents whenever a maturity gate changes. A source file or type name alone is never evidence of implementation or qualification.
