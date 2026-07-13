@@ -1,0 +1,74 @@
+name: ReleaseEngine CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract-and-fixture:
+    runs-on: macos-26
+    steps:
+      - name: Check out ReleaseEngine
+        uses: actions/checkout@v4
+
+      - name: Check out the local package graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          clone_package() {
+            local repository="$1"
+            local directory="$2"
+            git clone --depth 1 --branch main "https://github.com/1amageek/${repository}.git" "../${directory}"
+          }
+          clone_package XcircuitePackage XcircuitePackage
+          clone_package LogicDesign LogicDesign
+          clone_package PDKKit PDKKit
+          clone_package ToolQualification ToolQualification
+          clone_package SignoffToolSupport SignoffToolSupport
+          clone_package TimingEngine TimingEngine
+          clone_package PhysicalDesignEngine PhysicalDesignEngine
+
+      - name: Build the release product
+        shell: bash
+        run: |
+          set -euo pipefail
+          perl -e 'alarm shift; exec @ARGV' 240 swift build -c release
+
+      - name: Run the complete package test target
+        shell: bash
+        run: |
+          set -euo pipefail
+          perl -e 'alarm shift; exec @ARGV' 240 swift test
+
+      - name: Run the retained qualification fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin_path="$(swift build -c release --show-bin-path)"
+          fixture="Fixtures/Qualification/positive"
+          (
+            cd "$fixture"
+            "$bin_path/release-engine" qualify --request request.json > qualification-output.json
+          )
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          result = json.loads(Path("Fixtures/Qualification/positive/qualification-output.json").read_text())
+          assert result["status"] == "completed"
+          assert result["payload"]["qualified"] is True
+          assert result["payload"]["promotionStatus"] == "corpusChecked"
+          PY
+
+      - name: Upload immutable qualification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-engine-qualification-${{ github.run_id }}
+          path: Fixtures/Qualification/positive/qualification-output.json
+          if-no-files-found: error
+          retention-days: 90

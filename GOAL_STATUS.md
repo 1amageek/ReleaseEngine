@@ -2,7 +2,7 @@
 
 ## Current state
 
-**Native contract path, structured oracle correlation, process-scoped promotion, and qualification-stage approval/resume are implemented. CI-hosted retention publication and final release-profile eligibility remain explicit integration milestones.**
+**Native contract path, structured oracle correlation, process-scoped promotion, release-profile eligibility, and multi-stage approval/resume are implemented. CI-hosted DesignFlow retention publication and final process/foundry evidence remain explicit release gates.**
 
 | Maturity gate | Status | Evidence |
 |---|---|---|
@@ -12,13 +12,13 @@
 | Contract build | Passed | timeout-bounded `swift build` |
 | Contract test | Passed | timeout-bounded `swift test` suites; the package has no configured Xcode test action |
 | Domain implementation | Complete for native contract path | DefaultSignoffEvaluator and DefaultTapeoutPackaging |
-| CLI implementation | Complete for native and retained qualification paths | `release-engine profile/signoff/tapeout/qualify` |
+| CLI implementation | Complete for native, retained qualification and release-profile eligibility paths | `release-engine profile/signoff/tapeout/qualify/eligibility` |
 | Fixture corpus | Retained qualification regression corpus | ReleaseEngineBehaviorTests, RetainedQualificationTests and Fixtures |
 | Oracle correlation | Implemented for structured evidence | ReleaseEngine correlates supplied native/oracle case results; backend execution remains external |
 | Process qualification | Promotion contract implemented | Requires fresh PDK-scoped evidence and explicit production approval |
-| Xcircuite stage adapter | Implemented for signoff, tapeout and qualification | Release stage executors and persisted raw envelopes |
-| End-to-end flow evidence | Native + qualification + approval/resume path complete | ReleaseEngine qualification suite, DesignFlowKernel retention/envelope suite, Xcircuite release adapter suite |
-| Release readiness | Blocked by qualification policy | No process/foundry approval is inferred |
+| Xcircuite stage adapter | Implemented for signoff, qualification, tapeout and release-profile eligibility | Release stage executors, runtime specs, descriptors and persisted raw envelopes |
+| End-to-end flow evidence | Native + structured oracle + multi-stage approval/resume path complete | ReleaseEngine eligibility suite, DesignFlowKernel retention/envelope suite, Xcircuite release lineage suite |
+| Release readiness | Evidence-gated | CI retention-index publication and process/foundry approval are never inferred |
 
 ## Function status
 
@@ -61,7 +61,8 @@ The package goal is complete only when every P0 function has a concrete backend,
 
 - No external-tool invocation is bundled; native engines consume structured evidence.
 - External oracle execution and production process qualification are not manufactured by this package.
-- CI-hosted retention publication and final release-profile integration remain open.
+- CI-hosted DesignFlow retention-index publication and final process/foundry evidence remain open.
+- `release-profile` is now a native and headless integration contract; it returns blocked until the supplied process-scoped evidence and human approval satisfy policy.
 - Xcircuite remains responsible for external backend execution and flow orchestration; release stage adapters persist raw envelopes and map typed status/gates.
 
 This file must be updated by implementation agents whenever a maturity gate changes. A source file or type name alone is never evidence of implementation or qualification.

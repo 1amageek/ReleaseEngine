@@ -6,7 +6,7 @@ Fail-closed multi-axis signoff and immutable tapeout release contracts.
 
 This repository provides native, fail-closed release contract engines. It does not invoke a foundry tool or infer process qualification; qualification evidence is an explicit input and missing or stale semantics remain blocked.
 
-The current implementation closes the native release-contract path, structured native/oracle case correlation, process-scoped promotion evaluation, and the Xcircuite qualification-stage approval/resume path. Full release-profile readiness still requires CI-hosted retention publication and final process/foundry approval; the remaining exit criteria are tracked in [`MILESTONES.md`](MILESTONES.md).
+The current implementation closes the native release-contract path, structured native/oracle case correlation, process-scoped promotion evaluation, release-profile eligibility evaluation, and the Xcircuite headless approval/resume path. A release is still blocked unless CI retention evidence and final process/foundry approval are supplied; the remaining evidence criteria are tracked in [`MILESTONES.md`](MILESTONES.md).
 
 ## Products
 
@@ -16,7 +16,7 @@ The current implementation closes the native release-contract path, structured n
 | `SignoffEngine` | Required-axis applicability and verdict |
 | `TapeoutEngine` | Stream-out validation, exact-stream XOR and foundry handoff |
 | `QualificationEngine` | Retained corpus lane evaluation, case-level oracle correlation, and process-scoped promotion |
-| `ReleaseEngine` | Umbrella API |
+| `ReleaseEngine` | Umbrella API and release-profile eligibility evaluator |
 
 ## Implemented behavior
 
@@ -30,6 +30,7 @@ The current implementation closes the native release-contract path, structured n
 - Retained-corpus qualification evaluation with artifact integrity, freshness, coverage, metric, oracle-lane and process-scope gates.
 - Case-level native/oracle correlation with explicit agreement, backend/corpus/probe binding, and fail-closed mismatch diagnostics.
 - Explicit promotion status (`corpusChecked`, `oracleChecked`, `productionEligible`) with production-approval evidence gating.
+- Release-profile eligibility that correlates signoff, qualification and tapeout stage artifacts under one run ID, checks design/PDK binding, requires the configured qualification/promotion level, and binds a human approval to the final decision-packet digest.
 
 The exact-stream comparator intentionally does not claim geometric XOR equivalence when a qualified geometry backend is unavailable. Such a case remains failed or blocked according to the release requirement.
 
@@ -47,7 +48,7 @@ Every executing product uses:
 
 Xcircuite gathers all stage evidence and invokes QualificationEngine, SignoffEngine, and TapeoutEngine. TapeoutEngine accepts only the resulting approved bundle bound to the same layout, PDK, tool and waiver digests.
 
-The library does not depend on the Xcircuite runtime. Xcircuite owns the adapter to `DesignFlowKernel.FlowStageExecutor`, artifact persistence, qualification gates, repair loops and human approval.
+The library does not depend on the Xcircuite runtime. Xcircuite owns the adapter to `DesignFlowKernel.FlowStageExecutor`, artifact persistence, qualification gates, repair loops and human approval. The runtime also exposes a `release.profile` stage for the eligibility contract.
 
 ## Build
 
@@ -62,7 +63,10 @@ swift run release-engine profile --profile digital
 swift run release-engine signoff --request request.json
 swift run release-engine tapeout --request request.json
 swift run release-engine qualify --request qualification-request.json
+swift run release-engine eligibility --request release-profile-request.json
 ```
+
+`eligibility` emits a completed envelope only when signoff, qualification and tapeout are completed and approved, the qualification/promotion thresholds are met, all process and design digests agree, and a human approval references the final decision packet. Missing production evidence is a structured blocked result.
 
 ## Test
 
@@ -94,3 +98,7 @@ design-flow build-release-envelope --project-root <path> --run-id <id>
 See `DESIGN.md`, `INTERFACES.md` and `IMPLEMENTATION_PLAN.md` for the responsibility boundary and extension points.
 
 See `QUALIFICATION.md` for the capability boundary and retained-evidence policy.
+
+## Continuous integration
+
+`.github/workflows/release-engine.yml` builds the local package graph, runs the complete test target, replays the checked-in retained qualification fixture, and uploads the resulting JSON evidence with a 90-day artifact retention policy. DesignFlowKernel remains the owner of the hash-chained retention index and release envelope; its commands must be wired into the platform-level CI workflow before a production release is considered eligible.

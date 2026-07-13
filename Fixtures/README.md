@@ -10,6 +10,7 @@ Covered fixture classes:
 - complete GDSII stream-out and exact-stream handoff;
 - tapeout without stream-out prerequisites.
 - positive retained native-corpus qualification under `Qualification/positive`.
+- blocked release-profile eligibility under `Eligibility/blocked`.
 
 Fixtures intentionally exercise project-relative paths and immutable references. They do not encode a process qualification claim.
 
@@ -21,3 +22,6 @@ cd Fixtures/Qualification/positive
 ```
 
 The fixture demonstrates a completed native-corpus qualification input path. It does not provide external oracle correlation or foundry approval.
+
+The eligibility fixture demonstrates that corpus-only evidence and non-human or
+incorrectly bound approval remain blocked.

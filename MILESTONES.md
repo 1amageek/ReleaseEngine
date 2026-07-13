@@ -111,35 +111,43 @@ Current evidence:
 - `design-flow build-retention-index` persists `qualification/retention-index.json` and registers `qualification-retention-index` in the run manifest.
 - `design-flow validate-retention-index` exposes the same validation contract to Agent and CI callers.
 - Release envelopes consume and content-validate both the raw ReleaseEngine qualification result and the retention index.
+- ReleaseEngine owns a repository CI workflow that builds the local package graph, runs its full test target, replays the retained qualification fixture, and uploads the resulting JSON artifact with a 90-day retention setting.
 
 Remaining exit evidence:
 
-- A repository-owned CI workflow must execute the retention build/validation commands against the retained corpus and publish the resulting run artifacts.
+- The platform-level CI workflow must execute the DesignFlowKernel retention build/validation commands against the retained corpus and publish the resulting run artifacts.
 - CI artifact upload and retention policy configuration must be verified in the target hosting environment.
 
 ## M6 — Xcircuite headless flow and human approval/resume
 
-Status: complete for the qualification-stage approval/resume path.
+Status: complete for the qualification-stage and release-profile approval/resume path.
 
 Current evidence:
 
 - Release signoff and tapeout stage adapters load project-relative requests, persist raw envelopes and map typed status/gates.
 - The qualification stage adapter loads a project-relative qualification request, injects the flow project root, persists the raw envelope, and maps `payload.qualified` to the release gate.
 - The qualification adapter participates in the shared run ledger approval gate; an approved `release.qualification` stage resumes with the same run ID and registered result artifact.
+- A release profile integration fixture executes signoff → qualification → tapeout → profile under one run ID, records approval for each gated stage, resumes three times, and persists all stage result envelopes in the same run manifest.
+- DesignFlowKernel preserves the immutable reviewed stage result used by an approval, so later resumes do not invalidate earlier approvals when the applied gate changes the current result hash.
 
 Remaining hardening evidence:
 
-- Multi-stage signoff → qualification → tapeout lineage and explicit waiver/rejection policy still need a release-profile integration fixture.
-- The shared kernel approval/resume contract is covered; the complete profile-level release packet remains an M7 concern.
+- Explicit waiver/rejection policy and the complete profile-level release packet remain M7 evidence concerns.
 
 ## M7 — Release-profile eligibility
 
-Status: blocked.
+Status: implemented as a native fail-closed contract; production evidence remains blocked until supplied.
 
 Exit evidence:
 
 - M0–M6 exit evidence is present for the selected process profile.
 - A human approval record references the final signoff bundle, qualification digest and handoff manifest.
 - A reproducible release decision packet can be inspected by both Agent and human.
+
+Current implementation evidence:
+
+- `release-engine eligibility --request <path|->` evaluates the complete stage evidence contract and emits deterministic eligible/blocked payloads.
+- Xcircuite exposes `release.profile` as an agent-facing runtime stage and persists its raw result envelope.
+- Corpus-only qualification, non-human approval, digest mismatch and missing packet binding remain blocked by regression tests.
 
 Current blockers are tracked in `GOAL_STATUS.md` and `QUALIFICATION.md`. A source type, local smoke test or successful build never closes a qualification milestone by itself.

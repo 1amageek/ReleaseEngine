@@ -17,7 +17,7 @@ The package implements deterministic, protocol-first release decisions for:
 
 ## Qualification boundary
 
-The package does not claim that a native implementation is qualified for a foundry process. A release is eligible only when the request carries the required process-scoped tool qualification evidence. `QualificationEngine` validates retained corpus suite/report artifacts, freshness, integrity, lane coverage, thresholds, `ToolQualificationScope`, and case-level native/oracle correlation with fail-closed typed diagnostics. It emits explicit `corpusChecked`, `oracleChecked`, and `productionEligible` promotion states; production promotion requires qualified production-approval evidence. External-tool invocation, corpus retention publication, process approval, human approval, and resume policy remain owned by the Xcircuite/ToolQualification/DesignFlowKernel integration layer. Xcircuite provides release signoff, tapeout, and qualification stage adapters that load project-relative requests, inject the flow project root, persist raw envelopes, and map typed status and gates.
+The package does not claim that a native implementation is qualified for a foundry process. A release is eligible only when the request carries the required process-scoped tool qualification evidence. `QualificationEngine` validates retained corpus suite/report artifacts, freshness, integrity, lane coverage, thresholds, `ToolQualificationScope`, and case-level native/oracle correlation with fail-closed typed diagnostics. It emits explicit `corpusChecked`, `oracleChecked`, and `productionEligible` promotion states; production promotion requires qualified production-approval evidence. `DefaultReleaseProfileEligibilityEvaluator` then correlates signoff, qualification and tapeout stage evidence under one run ID and requires a human approval bound to the decision-packet digest. External-tool invocation, corpus retention publication, process approval, and foundry acceptance remain owned by the Xcircuite/ToolQualification/DesignFlowKernel integration layer. Xcircuite provides release signoff, tapeout, qualification and `release.profile` stage adapters that load project-relative requests, persist raw envelopes, and map typed status and gates.
 
 The exact-stream comparator is deliberately not a geometric XOR oracle. A different byte encoding is not treated as equivalent without a qualified geometry comparator.
 
@@ -39,6 +39,7 @@ Run the package tests with a timeout and invoke the JSON CLI against a request a
 perl -e 'alarm shift; exec @ARGV' 60 swift test
 swift run release-engine profile --profile mixed-signal
 swift run release-engine qualify --request qualification-request.json
+swift run release-engine eligibility --request release-profile-request.json
 ```
 
-The test suites create project-relative artifacts, record their digests and exercise approval, stale-evidence, missing-oracle, weak-metric, scope, and tamper fail-closed paths.
+The test suites create project-relative artifacts, record their digests and exercise approval, stale-evidence, missing-oracle, weak-metric, scope, tamper, multi-stage lineage and release-profile eligibility fail-closed paths.

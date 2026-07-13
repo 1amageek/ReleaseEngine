@@ -41,6 +41,10 @@ struct ReleaseEngineCLI {
             let envelope = try await executeQualification(arguments: Array(arguments.dropFirst()))
             try writeJSON(envelope)
             return exitCode(for: envelope.status)
+        case "eligibility":
+            let envelope = try await executeEligibility(arguments: Array(arguments.dropFirst()))
+            try writeJSON(envelope)
+            return exitCode(for: envelope.status)
         case "help", "--help", "-h":
             printHelp()
             return 0
@@ -74,6 +78,12 @@ struct ReleaseEngineCLI {
         let data = try inputData(arguments: arguments)
         let request = try decoder.decode(ReleaseQualificationRequest.self, from: data)
         return try await DefaultRetainedQualificationEvaluator().execute(request)
+    }
+
+    private static func executeEligibility(arguments: [String]) async throws -> ReleaseProfileEligibilityEnvelope {
+        let data = try inputData(arguments: arguments)
+        let request = try decoder.decode(ReleaseProfileEligibilityRequest.self, from: data)
+        return try await DefaultReleaseProfileEligibilityEvaluator().execute(request)
     }
 
     private static func inputData(arguments: [String]) throws -> Data {
@@ -131,8 +141,9 @@ struct ReleaseEngineCLI {
         release-engine signoff --request <path|->
         release-engine tapeout --request <path|->
         release-engine qualify --request <path|->
+        release-engine eligibility --request <path|->
 
-        The signoff, tapeout, and qualify commands emit deterministic JSON envelopes.
+        The signoff, tapeout, qualify, and eligibility commands emit JSON envelopes.
         Exit codes: 0 completed, 2 blocked, 3 failed, 4 cancelled.
         """)
     }

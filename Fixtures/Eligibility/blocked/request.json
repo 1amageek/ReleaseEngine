@@ -1,0 +1,95 @@
+{
+  "approval": {
+    "createdAt": "2026-07-13T00:00:00Z",
+    "note": "",
+    "reviewer": "automated-reviewer",
+    "reviewerKind": "agent",
+    "runID": "release-profile-blocked-fixture",
+    "stageID": "release.profile",
+    "stageResultByteCount": 1,
+    "stageResultSHA256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "verdict": "approved"
+  },
+  "decisionPacketArtifact": {
+    "artifactID": "decision-packet",
+    "byteCount": 1,
+    "format": "JSON",
+    "kind": "report",
+    "path": ".xcircuite/runs/release-profile-blocked-fixture/review/decision-packet.json",
+    "sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+  },
+  "inputs": [],
+  "processProfileID": "sky130",
+  "profileID": "digital",
+  "qualification": {
+    "approved": false,
+    "designDigest": null,
+    "pdkDigest": null,
+    "processProfileID": "sky130",
+    "promotionStatus": "corpusChecked",
+    "qualificationDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "qualificationLevel": "corpusChecked",
+    "qualified": true,
+    "resultArtifact": {
+      "artifactID": "qualification-result",
+      "byteCount": 1,
+      "format": "JSON",
+      "kind": "report",
+      "path": ".xcircuite/runs/release-profile-blocked-fixture/stages/release.qualification/result.json",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "runID": "release-profile-blocked-fixture",
+    "schemaVersion": 1,
+    "stageID": "release.qualification",
+    "status": "completed"
+  },
+  "requiredPromotionStatus": "productionEligible",
+  "requiredQualificationLevel": "productionEligible",
+  "runID": "release-profile-blocked-fixture",
+  "schemaVersion": 1,
+  "signoff": {
+    "approved": true,
+    "designDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+    "pdkDigest": "2222222222222222222222222222222222222222222222222222222222222222",
+    "qualified": false,
+    "processProfileID": "sky130",
+    "profileID": "digital",
+    "qualificationDigest": null,
+    "qualificationLevel": null,
+    "promotionStatus": null,
+    "resultArtifact": {
+      "artifactID": "signoff-result",
+      "byteCount": 1,
+      "format": "JSON",
+      "kind": "report",
+      "path": ".xcircuite/runs/release-profile-blocked-fixture/stages/release.signoff/result.json",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "runID": "release-profile-blocked-fixture",
+    "schemaVersion": 1,
+    "stageID": "release.signoff",
+    "status": "completed"
+  },
+  "tapeout": {
+    "approved": true,
+    "designDigest": "1111111111111111111111111111111111111111111111111111111111111111",
+    "pdkDigest": "2222222222222222222222222222222222222222222222222222222222222222",
+    "qualified": false,
+    "processProfileID": "sky130",
+    "qualificationDigest": null,
+    "qualificationLevel": null,
+    "promotionStatus": null,
+    "resultArtifact": {
+      "artifactID": "tapeout-result",
+      "byteCount": 1,
+      "format": "JSON",
+      "kind": "report",
+      "path": ".xcircuite/runs/release-profile-blocked-fixture/stages/release.tapeout/result.json",
+      "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "runID": "release-profile-blocked-fixture",
+    "schemaVersion": 1,
+    "stageID": "release.tapeout",
+    "status": "completed"
+  }
+}

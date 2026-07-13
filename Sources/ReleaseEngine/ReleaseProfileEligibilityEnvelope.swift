@@ -1,0 +1,4 @@
+import Foundation
+import XcircuitePackage
+
+public typealias ReleaseProfileEligibilityEnvelope = XcircuiteEngineResultEnvelope<ReleaseProfileEligibilityPayload>
