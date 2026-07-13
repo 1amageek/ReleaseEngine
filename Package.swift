@@ -14,7 +14,6 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../CircuiteFoundation"),
-        .package(path: "../XcircuitePackage"),
         .package(path: "../PDKKit"),
         .package(path: "../ToolQualification"),
         .package(path: "../PhysicalDesignEngine"),
@@ -23,20 +22,20 @@ let package = Package(
     targets: [
         .target(
             name: "ReleaseCore",
-            dependencies: [.product(name: "XcircuitePackage", package: "XcircuitePackage"), .product(name: "PDKCore", package: "PDKKit"), .product(name: "ToolQualification", package: "ToolQualification"), .product(name: "PhysicalDesignCore", package: "PhysicalDesignEngine"), .product(name: "LogicIR", package: "LogicDesign")]
+            dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), .product(name: "PDKCore", package: "PDKKit"), .product(name: "ToolQualification", package: "ToolQualification"), .product(name: "PhysicalDesignCore", package: "PhysicalDesignEngine"), .product(name: "LogicIR", package: "LogicDesign")]
         ),
         .target(
             name: "SignoffEngine",
-            dependencies: [.product(name: "XcircuitePackage", package: "XcircuitePackage"), "ReleaseCore", .product(name: "LogicIR", package: "LogicDesign")]
+            dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), "ReleaseCore", .product(name: "LogicIR", package: "LogicDesign")]
         ),
         .target(
             name: "TapeoutEngine",
-            dependencies: [.product(name: "XcircuitePackage", package: "XcircuitePackage"), "ReleaseCore", "SignoffEngine"]
+            dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), "ReleaseCore", "SignoffEngine"]
         ),
         .target(
             name: "QualificationEngine",
             dependencies: [
-                .product(name: "XcircuitePackage", package: "XcircuitePackage"),
+                .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 .product(name: "LogicIR", package: "LogicDesign"),
                 .product(name: "ToolQualification", package: "ToolQualification"),
                 "ReleaseCore",
@@ -68,7 +67,6 @@ let package = Package(
                 .product(name: "PDKCore", package: "PDKKit"),
                 .product(name: "PhysicalDesignCore", package: "PhysicalDesignEngine"),
                 .product(name: "ToolQualification", package: "ToolQualification"),
-                .product(name: "XcircuitePackage", package: "XcircuitePackage"),
             ]
         ),
     ]

@@ -1,14 +1,15 @@
 import Foundation
+import CryptoKit
 import ReleaseCore
 import ToolQualification
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluating {
-    private let verifier: XcircuiteFileReferenceVerifier
+    private let verifier: LocalArtifactVerifier
     private let now: @Sendable () -> Date
 
     public init(
-        verifier: XcircuiteFileReferenceVerifier = XcircuiteFileReferenceVerifier(),
+        verifier: LocalArtifactVerifier = LocalArtifactVerifier(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.verifier = verifier
@@ -17,9 +18,9 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
 
     public func execute(
         _ request: ReleaseQualificationRequest
-    ) async throws -> XcircuiteEngineResultEnvelope<ReleaseQualificationPayload> {
+    ) async throws -> ReleaseQualificationResult {
         let startedAt = now()
-        let metadata = XcircuiteEngineExecutionMetadata(
+        let metadata = try ExecutionProvenance(
             engineID: "release.qualification",
             implementationID: "native.release.qualification",
             implementationVersion: "1.0.0",
@@ -42,14 +43,14 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
         guard let projectRoot = request.projectRoot.map(URL.init(fileURLWithPath:)) else {
             return blockedEnvelope(request: request, metadata: metadata, code: "QUALIFICATION_PROJECT_ROOT_REQUIRED", message: "A project root is required to verify retained qualification artifacts.")
         }
-        var diagnostics: [XcircuiteEngineDiagnostic] = []
+        var diagnostics: [DesignDiagnostic] = []
         var blockedLanes = Set<String>()
         var failedLanes = Set<String>()
         var laneResults: [ReleaseQualificationDomainResult] = []
-        var status: XcircuiteEngineExecutionStatus = .completed
+        var status: ReleaseExecutionStatus = .completed
 
         func add(_ code: String, _ message: String, entity: String?, blocked: Bool) {
-            diagnostics.append(XcircuiteEngineDiagnostic(
+            diagnostics.append(DesignDiagnostic(
                 severity: .error,
                 code: code,
                 message: message,
@@ -65,9 +66,9 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
 
         let artifacts = requestArtifacts(request)
         for artifact in artifacts {
-            let integrity = verifier.verify(artifact, projectRoot: projectRoot)
-            if integrity.status != .verified {
-                add("QUALIFICATION_ARTIFACT_INTEGRITY_FAILED", integrity.message, entity: artifact.path, blocked: true)
+            let integrity = verifier.verify(artifact, relativeTo: projectRoot)
+            if !integrity.isVerified {
+                add("QUALIFICATION_ARTIFACT_INTEGRITY_FAILED", integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "), entity: artifact.path, blocked: true)
             }
         }
         guard status != .blocked else {
@@ -81,8 +82,8 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
             )
         }
 
-        guard let suiteURL = verifier.resolvedURL(for: request.suiteArtifact, projectRoot: projectRoot),
-              let reportURL = verifier.resolvedURL(for: request.qualificationReportArtifact, projectRoot: projectRoot) else {
+        guard let suiteURL = resolveURL(for: request.suiteArtifact, projectRoot: projectRoot),
+              let reportURL = resolveURL(for: request.qualificationReportArtifact, projectRoot: projectRoot) else {
             return blockedEnvelope(request: request, metadata: metadata, code: "QUALIFICATION_ARTIFACT_PATH_INVALID", message: "Retained suite or report path is not a safe project-relative path.")
         }
 
@@ -439,7 +440,7 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
 
     private func validateToolEvidence(
         _ evidence: [ToolEvidence],
-        evidenceArtifacts: [XcircuiteFileReference],
+        evidenceArtifacts: [ArtifactReference],
         policy: ReleaseQualificationPolicy,
         projectRoot: URL,
         currentDate: Date,
@@ -522,7 +523,7 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
                 )
                 continue
             }
-            guard let url = verifier.resolvedURL(for: artifact, projectRoot: projectRoot) else {
+            guard let url = resolveURL(for: artifact, projectRoot: projectRoot) else {
                 add(
                     "QUALIFICATION_PROCESS_EVIDENCE_PATH_INVALID",
                     "Process qualification artifact path is not a safe project-relative path.",
@@ -592,19 +593,21 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
         }
     }
 
-    private func matchingArtifact(for path: String?, in artifacts: [XcircuiteFileReference]) -> XcircuiteFileReference? {
+    private func matchingArtifact(for path: String?, in artifacts: [ArtifactReference]) -> ArtifactReference? {
         guard let path, !path.isEmpty else { return nil }
         return artifacts.first { pathsMatch($0.path, path) }
     }
 
     private func identityMatches(
         _ identity: RetainedCorpusReport.ArtifactIdentity?,
-        reference: XcircuiteFileReference
+        reference: ArtifactReference
     ) -> Bool {
         guard let identity,
               pathsMatch(identity.path, reference.path),
               identity.sha256 == reference.sha256,
-              identity.byteCount == reference.byteCount else {
+              let byteCount = identity.byteCount,
+              byteCount >= 0,
+              UInt64(byteCount) == reference.byteCount else {
             return false
         }
         return true
@@ -633,15 +636,15 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
         }.joined(separator: "\n")
         let scope = request.policy.requiredQualificationScope
         let scopeMaterial = [scope.implementationID, scope.binaryDigest, scope.algorithmVersion, scope.processProfileID, scope.deckDigest].joined(separator: "|")
-        return XcircuiteHasher().sha256(data: Data((request.processProfileID + "\n" + scopeMaterial + "\n" + material).utf8))
+        return SHA256.hash(data: Data((request.processProfileID + "\n" + scopeMaterial + "\n" + material).utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private func payload(
         request: ReleaseQualificationRequest,
-        status: XcircuiteEngineExecutionStatus,
+        status: ReleaseExecutionStatus,
         level: ToolQualificationLevel,
         digest: String?,
-        diagnostics: [XcircuiteEngineDiagnostic],
+        diagnostics: [DesignDiagnostic],
         laneResults: [ReleaseQualificationDomainResult],
         blockedLanes: Set<String>,
         failedLanes: Set<String>
@@ -660,18 +663,18 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
             qualificationScope: request.policy.requiredQualificationScope,
             qualificationDigest: digest,
             promotionStatus: promotionStatus,
-            promotionFailureCodes: diagnostics.map(\.code).sorted(),
+            promotionFailureCodes: diagnostics.map { $0.code.rawValue }.sorted(),
             laneResults: laneResults.sorted { $0.laneID < $1.laneID },
             blockedLanes: blockedLanes.sorted(),
             failedLanes: failedLanes.sorted()
         )
     }
 
-    private func uniqueArtifacts(_ artifacts: [XcircuiteFileReference]) -> [XcircuiteFileReference] {
+    private func uniqueArtifacts(_ artifacts: [ArtifactReference]) -> [ArtifactReference] {
         Array(Set(artifacts)).sorted { $0.path < $1.path }
     }
 
-    private func requestArtifacts(_ request: ReleaseQualificationRequest) -> [XcircuiteFileReference] {
+    private func requestArtifacts(_ request: ReleaseQualificationRequest) -> [ArtifactReference] {
         uniqueArtifacts(
             request.inputs
                 + [request.suiteArtifact, request.qualificationReportArtifact]
@@ -683,13 +686,13 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
 
     private func envelope(
         request: ReleaseQualificationRequest,
-        status: XcircuiteEngineExecutionStatus,
-        diagnostics: [XcircuiteEngineDiagnostic],
-        artifacts: [XcircuiteFileReference],
-        metadata: XcircuiteEngineExecutionMetadata,
+        status: ReleaseExecutionStatus,
+        diagnostics: [DesignDiagnostic],
+        artifacts: [ArtifactReference],
+        metadata: ExecutionProvenance,
         payload: ReleaseQualificationPayload
-    ) -> XcircuiteEngineResultEnvelope<ReleaseQualificationPayload> {
-        XcircuiteEngineResultEnvelope(
+    ) -> ReleaseQualificationResult {
+        ReleaseQualificationResult(
             schemaVersion: ReleaseQualificationRequest.currentSchemaVersion,
             runID: request.runID,
             status: status,
@@ -702,14 +705,14 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
 
     private func blockedEnvelope(
         request: ReleaseQualificationRequest,
-        metadata: XcircuiteEngineExecutionMetadata,
+        metadata: ExecutionProvenance,
         code: String,
         message: String
-    ) -> XcircuiteEngineResultEnvelope<ReleaseQualificationPayload> {
+    ) -> ReleaseQualificationResult {
         envelope(
             request: request,
             status: .blocked,
-            diagnostics: [XcircuiteEngineDiagnostic(severity: .error, code: code, message: message, entity: request.runID, suggestedActions: ["inspect_qualification_request", "retain_process_scoped_evidence"])],
+            diagnostics: [DesignDiagnostic(severity: .error, code: code, message: message, entity: request.runID, suggestedActions: ["inspect_qualification_request", "retain_process_scoped_evidence"])],
             artifacts: requestArtifacts(request),
             metadata: metadata,
             payload: ReleaseQualificationPayload(
@@ -720,5 +723,13 @@ public struct DefaultRetainedQualificationEvaluator: ReleaseQualificationEvaluat
                 qualificationDigest: nil
             )
         )
+    }
+
+    private func resolveURL(for reference: ArtifactReference, projectRoot: URL) -> URL? {
+        do {
+            return try reference.locator.location.resolvedFileURL(relativeTo: projectRoot)
+        } catch {
+            return nil
+        }
     }
 }

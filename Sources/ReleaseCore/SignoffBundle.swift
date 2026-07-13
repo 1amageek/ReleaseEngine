@@ -1,6 +1,7 @@
 import Foundation
+import CryptoKit
 import LogicIR
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct SignoffBundle: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1
@@ -91,7 +92,7 @@ public struct SignoffBundle: Sendable, Hashable, Codable {
             axisMaterial,
             waiverMaterial,
         ].joined(separator: "\n")
-        return XcircuiteHasher().sha256(data: Data(material.utf8))
+        return SHA256.hash(data: Data(material.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     public var isSelfConsistent: Bool {

@@ -6,15 +6,13 @@ Fail-closed multi-axis signoff and immutable tapeout release contracts.
 
 This repository provides native, fail-closed release contract engines. It does not invoke a foundry tool or infer process qualification; qualification evidence is an explicit input and missing or stale semantics remain blocked.
 
-The current implementation closes the native release-contract path, structured native/oracle case correlation, process-scoped promotion evaluation, release-profile eligibility evaluation, and the Xcircuite headless approval/resume path. A release is still blocked unless CI retention evidence and final process/foundry approval are supplied; the remaining evidence criteria are tracked in [`MILESTONES.md`](MILESTONES.md).
+The current implementation closes the native release-contract path, structured native/oracle case correlation, process-scoped promotion evaluation, and release-profile eligibility evaluation. DesignFlowKernel owns approval and resume while Xcircuite supplies concrete persistence. A release is still blocked unless CI retention evidence and final process/foundry approval are supplied; the remaining evidence criteria are tracked in [`MILESTONES.md`](MILESTONES.md).
 
-The canonical release-profile eligibility path also implements the
+The canonical release-profile eligibility path implements the
 `CircuiteFoundation.Engine` contract. It consumes `ArtifactReference` values,
 produces structured `DesignDiagnostic` values, and records an
 `ExecutionProvenance`/`EvidenceManifest` that binds the reviewed artifacts and
-human approval to the decision. The older Xcircuite request/envelope API is
-retained as a compatibility surface for existing flow adapters while stage
-requests migrate incrementally.
+human approval to the decision.
 
 ## Products
 
@@ -52,23 +50,16 @@ The Foundation release-profile API uses:
 - typed `ContentDigest` and `ExecutionProvenance` values for release evidence;
 - explicit blocked and eligible states, with human approval bound to the decision-packet digest.
 
-The compatibility stage API still uses:
-
-- a `Codable`, `Hashable`, `Sendable` request conforming to `XcircuiteEngineRequest`;
-- `XcircuiteEngineResultEnvelope<Payload>` for status, diagnostics, artifacts and execution metadata;
-- protocol-first dependency injection;
-- immutable `XcircuiteFileReference` inputs and outputs;
-- explicit blocked, failed and cancelled states.
-
-This compatibility surface is an adapter boundary, not the canonical
-Foundation artifact model. New callers should use the Foundation release
-profile types and pass stage results as immutable `ArtifactReference` values.
+All stage APIs use domain-specific `Codable`, `Hashable`, `Sendable` requests
+and results. Cross-engine artifacts are immutable `ArtifactReference` values,
+diagnostics are `DesignDiagnostic`, and execution evidence is
+`ExecutionProvenance`; no compatibility envelope or adapter layer is required.
 
 ## Xcircuite integration
 
-Xcircuite gathers all stage evidence and invokes QualificationEngine, SignoffEngine, and TapeoutEngine. TapeoutEngine accepts only the resulting approved bundle bound to the same layout, PDK, tool and waiver digests.
+Xcircuite gathers all stage evidence and invokes QualificationEngine, SignoffEngine, and TapeoutEngine through their public protocols. TapeoutEngine accepts only the resulting approved bundle bound to the same layout, PDK, tool and waiver digests.
 
-The library does not depend on the Xcircuite runtime. Xcircuite owns the adapter to `DesignFlowKernel.FlowStageExecutor`, artifact persistence, qualification gates, repair loops and human approval. The runtime also exposes a `release.profile` stage for the eligibility contract.
+The library does not depend on the Xcircuite runtime. Xcircuite owns concrete artifact persistence and composition with `DesignFlowKernel.FlowStageExecutor`; the engine remains directly protocol-conformant and independently usable.
 
 ## Build
 

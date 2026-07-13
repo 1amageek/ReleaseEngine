@@ -1,20 +1,20 @@
 import Foundation
 import ReleaseCore
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct DefaultStreamOutValidator: StreamOutValidating {
-    private let verifier: XcircuiteFileReferenceVerifier
+    private let verifier: LocalArtifactVerifier
 
-    public init(verifier: XcircuiteFileReferenceVerifier = XcircuiteFileReferenceVerifier()) {
+    public init(verifier: LocalArtifactVerifier = LocalArtifactVerifier()) {
         self.verifier = verifier
     }
 
     public func validate(_ request: StreamOutRequest) -> StreamOutValidationResult {
-        var diagnostics: [XcircuiteEngineDiagnostic] = []
+        var diagnostics: [DesignDiagnostic] = []
         var status: LayoutXORStatus = .passed
 
         func fail(_ code: String, _ message: String, entity: String?, blocked: Bool) {
-            diagnostics.append(XcircuiteEngineDiagnostic(
+            diagnostics.append(DesignDiagnostic(
                 severity: .error,
                 code: code,
                 message: message,
@@ -88,23 +88,23 @@ public struct DefaultStreamOutValidator: StreamOutValidating {
             fail("SOURCE_LAYOUT_DIGEST_MISMATCH", "Physical design layout digest does not match its artifact reference.", entity: source.layoutArtifact.path, blocked: false)
         }
 
-        let sourceIntegrity = verifier.verify(source.layoutArtifact, projectRoot: projectRoot)
-        if sourceIntegrity.status != .verified {
-            fail("SOURCE_LAYOUT_INTEGRITY_FAILED", sourceIntegrity.message, entity: source.layoutArtifact.path, blocked: true)
+        let sourceIntegrity = verifier.verify(source.layoutArtifact, relativeTo: projectRoot)
+        if !sourceIntegrity.isVerified {
+            fail("SOURCE_LAYOUT_INTEGRITY_FAILED", integrityMessage(sourceIntegrity), entity: source.layoutArtifact.path, blocked: true)
         }
-        let streamedIntegrity = verifier.verify(manifest.streamedArtifact, projectRoot: projectRoot)
-        if streamedIntegrity.status != .verified {
-            fail("STREAMED_LAYOUT_INTEGRITY_FAILED", streamedIntegrity.message, entity: manifest.streamedArtifact.path, blocked: true)
+        let streamedIntegrity = verifier.verify(manifest.streamedArtifact, relativeTo: projectRoot)
+        if !streamedIntegrity.isVerified {
+            fail("STREAMED_LAYOUT_INTEGRITY_FAILED", integrityMessage(streamedIntegrity), entity: manifest.streamedArtifact.path, blocked: true)
         }
 
-        if let sourceData = readData(at: verifier.resolvedURL(for: source.layoutArtifact, projectRoot: projectRoot)) {
+        if let sourceData = readData(at: resolvedURL(for: source.layoutArtifact, projectRoot: projectRoot)) {
             if !hasValidSignature(sourceData, format: source.layoutArtifact.format) {
                 fail("SOURCE_LAYOUT_SIGNATURE_INVALID", "Source layout bytes do not contain the expected GDSII or OASIS signature.", entity: source.layoutArtifact.path, blocked: false)
             }
         } else {
             fail("SOURCE_LAYOUT_UNREADABLE", "Source layout bytes could not be read for format validation.", entity: source.layoutArtifact.path, blocked: true)
         }
-        if let streamedData = readData(at: verifier.resolvedURL(for: manifest.streamedArtifact, projectRoot: projectRoot)) {
+        if let streamedData = readData(at: resolvedURL(for: manifest.streamedArtifact, projectRoot: projectRoot)) {
             if !hasValidSignature(streamedData, format: manifest.streamedArtifact.format) {
                 fail("STREAMED_LAYOUT_SIGNATURE_INVALID", "Streamed layout bytes do not contain the expected GDSII or OASIS signature.", entity: manifest.streamedArtifact.path, blocked: false)
             }
@@ -124,7 +124,21 @@ public struct DefaultStreamOutValidator: StreamOutValidating {
         }
     }
 
-    private func hasValidSignature(_ data: Data, format: XcircuiteFileFormat) -> Bool {
+    private func resolvedURL(for reference: ArtifactReference, projectRoot: URL) -> URL? {
+        do {
+            return try reference.locator.location.resolvedFileURL(relativeTo: projectRoot)
+        } catch {
+            return nil
+        }
+    }
+
+    private func integrityMessage(_ integrity: ArtifactIntegrity) -> String {
+        integrity.issues.map { issue in
+            issue.detail ?? issue.code.rawValue
+        }.joined(separator: "; ")
+    }
+
+    private func hasValidSignature(_ data: Data, format: ArtifactFormat) -> Bool {
         switch format {
         case .oasis:
             data.starts(with: Data("%SEMI-OASIS".utf8))

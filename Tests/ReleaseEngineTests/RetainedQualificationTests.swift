@@ -2,7 +2,7 @@ import Foundation
 import QualificationEngine
 import Testing
 import ToolQualification
-import XcircuitePackage
+import CircuiteFoundation
 
 @Suite("Retained qualification")
 struct RetainedQualificationTests {
@@ -38,7 +38,7 @@ struct RetainedQualificationTests {
         #expect(result.status == .blocked)
         #expect(result.payload.qualified == false)
         #expect(result.payload.blockedLanes == ["drc:external-oracle"])
-        #expect(result.diagnostics.contains { $0.code == "QUALIFICATION_ORACLE_RESULT_MISSING" })
+        #expect(result.diagnostics.contains { $0.code.rawValue == "QUALIFICATION_ORACLE_RESULT_MISSING" })
     }
 
     @Test("native and external oracle cases must correlate before oracle promotion")
@@ -69,7 +69,7 @@ struct RetainedQualificationTests {
         #expect(result.payload.qualified == false)
         #expect(result.payload.failedLanes == ["drc:external-oracle"])
         #expect(result.payload.laneResults.first?.failureCodes.contains("ORACLE_CASE_MISMATCH") == true)
-        #expect(result.diagnostics.contains { $0.code == "QUALIFICATION_METRIC_FAILED" })
+        #expect(result.diagnostics.contains { $0.code.rawValue == "QUALIFICATION_METRIC_FAILED" })
     }
 
     @Test("oracle case set mismatch blocks correlation")
@@ -83,7 +83,7 @@ struct RetainedQualificationTests {
         #expect(result.status == .blocked)
         #expect(result.payload.qualified == false)
         #expect(result.payload.blockedLanes == ["drc:external-oracle"])
-        #expect(result.diagnostics.contains { $0.code == "QUALIFICATION_ORACLE_CASE_SET_MISMATCH" })
+        #expect(result.diagnostics.contains { $0.code.rawValue == "QUALIFICATION_ORACLE_CASE_SET_MISMATCH" })
     }
 
     @Test("production eligibility requires a fresh scoped production approval")
@@ -179,7 +179,7 @@ struct RetainedQualificationTests {
 
         #expect(result.status == .blocked)
         #expect(result.payload.qualified == false)
-        #expect(result.diagnostics.contains { $0.code == "QUALIFICATION_EVIDENCE_STALE" })
+        #expect(result.diagnostics.contains { $0.code.rawValue == "QUALIFICATION_EVIDENCE_STALE" })
     }
 
     @Test("a tampered role artifact cannot be hidden by a stale inputs list")
@@ -188,12 +188,21 @@ struct RetainedQualificationTests {
         defer { Self.removeTemporaryRoot(root) }
 
         var request = try Self.makeRequest(root: root, laneKind: .nativeCorpus)
-        request.qualificationReportArtifact.sha256 = String(repeating: "f", count: 64)
+        let originalArtifact = request.qualificationReportArtifact
+        request.qualificationReportArtifact = ArtifactReference(
+            id: originalArtifact.id,
+            locator: originalArtifact.locator,
+            digest: try ContentDigest(
+                algorithm: .sha256,
+                hexadecimalValue: String(repeating: "f", count: 64)
+            ),
+            byteCount: originalArtifact.byteCount
+        )
         let result = try await DefaultRetainedQualificationEvaluator(now: { Self.evaluationDate }).execute(request)
 
         #expect(result.status == .blocked)
         #expect(result.payload.qualified == false)
-        #expect(result.diagnostics.contains { $0.code == "QUALIFICATION_ARTIFACT_INTEGRITY_FAILED" })
+        #expect(result.diagnostics.contains { $0.code.rawValue == "QUALIFICATION_ARTIFACT_INTEGRITY_FAILED" })
     }
 
     @Test("an incomplete process scope blocks qualification")
@@ -207,7 +216,7 @@ struct RetainedQualificationTests {
 
         #expect(result.status == .blocked)
         #expect(result.payload.qualified == false)
-        #expect(result.diagnostics.contains { $0.code == "INVALID_QUALIFICATION_POLICY" })
+        #expect(result.diagnostics.contains { $0.code.rawValue == "INVALID_QUALIFICATION_POLICY" })
     }
 
     @Test("weak retained metrics fail the qualification lane")
@@ -221,7 +230,7 @@ struct RetainedQualificationTests {
         #expect(result.status == .failed)
         #expect(result.payload.qualified == false)
         #expect(result.payload.failedLanes == ["drc:native-corpus"])
-        #expect(result.diagnostics.contains { $0.code == "QUALIFICATION_METRIC_FAILED" })
+        #expect(result.diagnostics.contains { $0.code.rawValue == "QUALIFICATION_METRIC_FAILED" })
     }
 
     @Test("a report identity mismatch blocks retained qualification")
@@ -234,7 +243,7 @@ struct RetainedQualificationTests {
 
         #expect(result.status == .blocked)
         #expect(result.payload.qualified == false)
-        #expect(result.diagnostics.contains { $0.code == "QUALIFICATION_REPORT_IDENTITY_MISMATCH" })
+        #expect(result.diagnostics.contains { $0.code.rawValue == "QUALIFICATION_REPORT_IDENTITY_MISMATCH" })
     }
 
     private static func makeRequest(
@@ -305,7 +314,7 @@ struct RetainedQualificationTests {
                     report: RetainedCorpusReport.ArtifactIdentity(
                         path: reportArtifact.path,
                         sha256: mismatchedReportIdentity ? String(repeating: "f", count: 64) : reportArtifact.sha256,
-                        byteCount: reportArtifact.byteCount,
+                        byteCount: Int64(reportArtifact.byteCount),
                         status: "passed"
                     ),
                     toolEvidence: RetainedCorpusReport.ToolEvidenceObservation(
@@ -315,7 +324,7 @@ struct RetainedQualificationTests {
                     toolEvidenceExport: RetainedCorpusReport.ArtifactIdentity(
                         path: evidenceArtifact.path,
                         sha256: evidenceArtifact.sha256,
-                        byteCount: evidenceArtifact.byteCount,
+                        byteCount: Int64(evidenceArtifact.byteCount),
                         status: "passed"
                     )
                 )
@@ -494,14 +503,14 @@ struct RetainedQualificationTests {
                     report: RetainedCorpusReport.ArtifactIdentity(
                         path: nativeReportReference.path,
                         sha256: nativeReportReference.sha256,
-                        byteCount: nativeReportReference.byteCount,
+                        byteCount: Int64(nativeReportReference.byteCount),
                         status: "passed"
                     ),
                     toolEvidence: nil,
                     toolEvidenceExport: RetainedCorpusReport.ArtifactIdentity(
                         path: evidenceReference.path,
                         sha256: evidenceReference.sha256,
-                        byteCount: evidenceReference.byteCount,
+                        byteCount: Int64(evidenceReference.byteCount),
                         status: "passed"
                     ),
                     caseResults: nativeCaseResults
@@ -522,14 +531,14 @@ struct RetainedQualificationTests {
                     report: RetainedCorpusReport.ArtifactIdentity(
                         path: oracleReportReference.path,
                         sha256: oracleReportReference.sha256,
-                        byteCount: oracleReportReference.byteCount,
+                        byteCount: Int64(oracleReportReference.byteCount),
                         status: "passed"
                     ),
                     toolEvidence: nil,
                     toolEvidenceExport: RetainedCorpusReport.ArtifactIdentity(
                         path: evidenceReference.path,
                         sha256: evidenceReference.sha256,
-                        byteCount: evidenceReference.byteCount,
+                        byteCount: Int64(evidenceReference.byteCount),
                         status: "passed"
                     ),
                     caseResults: oracleCaseResults
@@ -631,8 +640,8 @@ struct RetainedQualificationTests {
         root: URL,
         relativePath: String,
         value: Value,
-        kind: XcircuiteFileKind
-    ) throws -> XcircuiteFileReference {
+        kind: ArtifactKind
+    ) throws -> ArtifactReference {
         try makeArtifact(
             root: root,
             relativePath: relativePath,
@@ -646,7 +655,7 @@ struct RetainedQualificationTests {
         root: URL,
         relativePath: String,
         value: Value
-    ) throws -> XcircuiteFileReference {
+    ) throws -> ArtifactReference {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         return try makeArtifact(
@@ -668,18 +677,18 @@ struct RetainedQualificationTests {
         root: URL,
         relativePath: String,
         data: Data,
-        kind: XcircuiteFileKind,
-        format: XcircuiteFileFormat
-    ) throws -> XcircuiteFileReference {
+        kind: ArtifactKind,
+        format: ArtifactFormat
+    ) throws -> ArtifactReference {
         let url = root.appending(path: relativePath)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url)
-        return XcircuiteFileReference(
+        return makeTestArtifactReference(
             artifactID: relativePath.replacingOccurrences(of: "/", with: "-"),
             path: relativePath,
             kind: kind,
             format: format,
-            sha256: XcircuiteHasher().sha256(data: data),
+            sha256: SHA256ContentDigester().sha256(data: data),
             byteCount: Int64(data.count)
         )
     }

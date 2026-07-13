@@ -1,41 +1,41 @@
 import Foundation
 import LogicIR
-import XcircuitePackage
+import CircuiteFoundation
 import ReleaseCore
 
-public struct SignoffRequest: XcircuiteEngineRequest {
+public struct SignoffRequest: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1
 
     public var schemaVersion: Int
     public var runID: String
-    public var inputs: [XcircuiteFileReference]
+    public var inputs: [ArtifactReference]
 
     public var profileID: String
     public var designKind: ReleaseDesignKind
     public var designDigest: String
     public var designProvenance: LogicDesignProvenance?
     public var pdkDigest: String
-    public var evidence: [XcircuiteFileReference]
+    public var evidence: [ArtifactReference]
     public var evidenceRecords: [ReleaseSignoffEvidenceReference]
     public var waivers: [SignoffWaiver]
     public var projectRoot: String?
     public var finalLayoutDigest: String?
-    public var bundleArtifact: XcircuiteFileReference?
+    public var bundleArtifact: ArtifactReference?
 
     public init(
         runID: String,
-        inputs: [XcircuiteFileReference],
+        inputs: [ArtifactReference],
         profileID: String,
         designDigest: String,
         designProvenance: LogicDesignProvenance? = nil,
         pdkDigest: String,
-        evidence: [XcircuiteFileReference],
+        evidence: [ArtifactReference],
         designKind: ReleaseDesignKind = .digital,
         evidenceRecords: [ReleaseSignoffEvidenceReference] = [],
         waivers: [SignoffWaiver] = [],
         projectRoot: String? = nil,
         finalLayoutDigest: String? = nil,
-        bundleArtifact: XcircuiteFileReference? = nil
+        bundleArtifact: ArtifactReference? = nil
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.runID = runID

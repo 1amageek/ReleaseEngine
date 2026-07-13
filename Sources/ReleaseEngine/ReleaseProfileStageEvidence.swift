@@ -1,7 +1,8 @@
 import Foundation
 import QualificationEngine
+import ReleaseCore
 import ToolQualification
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct ReleaseProfileStageEvidence: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1
@@ -9,8 +10,8 @@ public struct ReleaseProfileStageEvidence: Sendable, Hashable, Codable {
     public var schemaVersion: Int
     public var stageID: String
     public var runID: String
-    public var status: XcircuiteEngineExecutionStatus
-    public var resultArtifact: XcircuiteFileReference
+    public var status: ReleaseExecutionStatus
+    public var resultArtifact: ArtifactReference
     public var profileID: String?
     public var processProfileID: String?
     public var designDigest: String?
@@ -25,8 +26,8 @@ public struct ReleaseProfileStageEvidence: Sendable, Hashable, Codable {
     public init(
         stageID: String,
         runID: String,
-        status: XcircuiteEngineExecutionStatus,
-        resultArtifact: XcircuiteFileReference,
+        status: ReleaseExecutionStatus,
+        resultArtifact: ArtifactReference,
         profileID: String? = nil,
         processProfileID: String? = nil,
         designDigest: String? = nil,

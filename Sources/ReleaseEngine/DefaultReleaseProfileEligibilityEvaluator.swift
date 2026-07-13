@@ -1,8 +1,9 @@
 import Foundation
+import CryptoKit
 import ReleaseCore
 import QualificationEngine
 import ToolQualification
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct DefaultReleaseProfileEligibilityEvaluator: ReleaseProfileEligibilityEvaluating {
     public init() {}
@@ -164,19 +165,19 @@ public struct DefaultReleaseProfileEligibilityEvaluator: ReleaseProfileEligibili
             failureCodes: failures.sorted()
         )
         let completedAt = Date()
-        return XcircuiteEngineResultEnvelope(
+        return ReleaseProfileEligibilityResult(
             schemaVersion: 1,
             runID: request.runID,
             status: qualified ? .completed : .blocked,
             diagnostics: failures.sorted().map { code in
-                XcircuiteEngineDiagnostic(
+                DesignDiagnostic(
                     severity: .error,
                     code: code,
                     message: "Release profile eligibility is blocked by \(code)."
                 )
             },
             artifacts: [request.decisionPacketArtifact],
-            metadata: XcircuiteEngineExecutionMetadata(
+            metadata: try ExecutionProvenance(
                 engineID: "release.profile.eligibility",
                 implementationID: "native.release.profile.eligibility",
                 implementationVersion: "1.0.0",
@@ -188,7 +189,7 @@ public struct DefaultReleaseProfileEligibilityEvaluator: ReleaseProfileEligibili
     }
 
     private func validateArtifact(
-        _ artifact: XcircuiteFileReference,
+        _ artifact: ArtifactReference,
         codePrefix: String,
         runID: String,
         add: (String) -> Void
@@ -196,18 +197,12 @@ public struct DefaultReleaseProfileEligibilityEvaluator: ReleaseProfileEligibili
         if artifact.path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             add("\(codePrefix)-path-missing")
         }
-        guard let sha256 = artifact.sha256, isSHA256(sha256) else {
+        guard isSHA256(artifact.sha256) else {
             add("\(codePrefix)-digest-missing")
             return
         }
-        if let byteCount = artifact.byteCount, byteCount <= 0 {
+        if artifact.byteCount == 0 {
             add("\(codePrefix)-byte-count-invalid")
-        } else if artifact.byteCount == nil {
-            add("\(codePrefix)-byte-count-missing")
-        }
-        if let producedByRunID = artifact.producedByRunID,
-           producedByRunID != runID {
-            add("\(codePrefix)-run-id-mismatch")
         }
     }
 
@@ -221,15 +216,15 @@ public struct DefaultReleaseProfileEligibilityEvaluator: ReleaseProfileEligibili
             request.processProfileID,
             request.requiredQualificationLevel.rawValue,
             request.requiredPromotionStatus.rawValue,
-            request.signoff.resultArtifact.sha256 ?? "",
-            request.qualification.resultArtifact.sha256 ?? "",
-            request.tapeout.resultArtifact.sha256 ?? "",
-            request.decisionPacketArtifact.sha256 ?? "",
+            request.signoff.resultArtifact.sha256,
+            request.qualification.resultArtifact.sha256,
+            request.tapeout.resultArtifact.sha256,
+            request.decisionPacketArtifact.sha256,
             reviewedArtifactDigests.joined(separator: ","),
             request.approval.reviewer,
             request.approval.createdAt.iso8601String,
         ].joined(separator: "\n")
-        return XcircuiteHasher().sha256(data: Data(material.utf8))
+        return SHA256.hash(data: Data(material.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private func isSHA256(_ value: String) -> Bool {

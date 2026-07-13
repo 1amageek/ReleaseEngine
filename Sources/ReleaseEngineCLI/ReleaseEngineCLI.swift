@@ -4,7 +4,7 @@ import ReleaseCore
 import ReleaseEngine
 import SignoffEngine
 import TapeoutEngine
-import XcircuitePackage
+import CircuiteFoundation
 
 @main
 struct ReleaseEngineCLI {
@@ -62,19 +62,19 @@ struct ReleaseEngineCLI {
         return 0
     }
 
-    private static func executeSignoff(arguments: [String]) async throws -> XcircuiteEngineResultEnvelope<SignoffPayload> {
+    private static func executeSignoff(arguments: [String]) async throws -> SignoffResult {
         let data = try inputData(arguments: arguments)
         let request = try decoder.decode(SignoffRequest.self, from: data)
         return try await DefaultSignoffEvaluator().execute(request)
     }
 
-    private static func executeTapeout(arguments: [String]) async throws -> XcircuiteEngineResultEnvelope<TapeoutPayload> {
+    private static func executeTapeout(arguments: [String]) async throws -> TapeoutResult {
         let data = try inputData(arguments: arguments)
         let request = try decoder.decode(TapeoutRequest.self, from: data)
         return try await DefaultTapeoutPackaging().execute(request)
     }
 
-    private static func executeQualification(arguments: [String]) async throws -> XcircuiteEngineResultEnvelope<ReleaseQualificationPayload> {
+    private static func executeQualification(arguments: [String]) async throws -> ReleaseQualificationResult {
         let data = try inputData(arguments: arguments)
         let request = try decoder.decode(ReleaseQualificationRequest.self, from: data)
         return try await DefaultRetainedQualificationEvaluator().execute(request)
@@ -122,7 +122,7 @@ struct ReleaseEngineCLI {
         FileHandle.standardOutput.write(data)
     }
 
-    private static func exitCode(for status: XcircuiteEngineExecutionStatus) -> Int32 {
+    private static func exitCode(for status: ReleaseExecutionStatus) -> Int32 {
         switch status {
         case .completed:
             0

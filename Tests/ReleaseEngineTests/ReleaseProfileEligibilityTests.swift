@@ -4,7 +4,7 @@ import ReleaseCore
 import ReleaseEngine
 import Testing
 import ToolQualification
-import XcircuitePackage
+import CircuiteFoundation
 
 @Suite("Release profile eligibility")
 struct ReleaseProfileEligibilityTests {
@@ -115,11 +115,11 @@ struct ReleaseProfileEligibilityTests {
         )
         #expect(decodedRequest == request)
 
-        let envelope = try DefaultReleaseProfileEligibilityEnvelopeFactory.make(
+        let envelope = try DefaultReleaseProfileEligibilityResultFactory.make(
             request: request
         )
         let decodedEnvelope = try decoder.decode(
-            ReleaseProfileEligibilityEnvelope.self,
+            ReleaseProfileEligibilityResult.self,
             from: encoder.encode(envelope)
         )
         #expect(decodedEnvelope == envelope)
@@ -145,7 +145,7 @@ struct ReleaseProfileEligibilityTests {
         qualificationLevel: ToolQualificationLevel,
         requiredQualificationLevel: ToolQualificationLevel = .oracleChecked,
         promotionStatus: ReleaseProfileRequiredPromotionStatus,
-        reviewerKind: XcircuiteRunActionActor.Kind,
+        reviewerKind: ReleaseApprovalRecord.ReviewerKind,
         approvalPacketDigest: String,
         approvalMatchesPacket: Bool = true
     ) -> ReleaseProfileEligibilityRequest {
@@ -161,7 +161,7 @@ struct ReleaseProfileEligibilityTests {
             pdkDigest: pdkDigest
         )
         let packet = artifact(id: "decision-packet", digest: approvalPacketDigest)
-        let approval = XcircuiteApprovalRecord(
+        let approval = ReleaseApprovalRecord(
             runID: runID,
             stageID: "release.profile",
             verdict: .approved,
@@ -171,7 +171,7 @@ struct ReleaseProfileEligibilityTests {
             stageResultSHA256: approvalMatchesPacket
                 ? packet.sha256
                 : String(repeating: "f", count: 64),
-            stageResultByteCount: packet.byteCount
+            stageResultByteCount: Int64(packet.byteCount)
         )
         return ReleaseProfileEligibilityRequest(
             runID: runID,
@@ -218,8 +218,8 @@ struct ReleaseProfileEligibilityTests {
         )
     }
 
-    private func artifact(id: String, digest: String) -> XcircuiteFileReference {
-        XcircuiteFileReference(
+    private func artifact(id: String, digest: String) -> ArtifactReference {
+        makeTestArtifactReference(
             artifactID: id,
             path: "runs/release-profile/\(id).json",
             kind: .report,
@@ -243,16 +243,16 @@ private extension ReleaseProfileRequiredPromotionStatus {
     }
 }
 
-private enum DefaultReleaseProfileEligibilityEnvelopeFactory {
+private enum DefaultReleaseProfileEligibilityResultFactory {
     static func make(
         request: ReleaseProfileEligibilityRequest
-    ) throws -> ReleaseProfileEligibilityEnvelope {
+    ) throws -> ReleaseProfileEligibilityResult {
         try makeAsync(request: request)
     }
 
     private static func makeAsync(
         request: ReleaseProfileEligibilityRequest
-    ) throws -> ReleaseProfileEligibilityEnvelope {
+    ) throws -> ReleaseProfileEligibilityResult {
         let date = Date(timeIntervalSince1970: 1_750_000_000)
         let payload = ReleaseProfileEligibilityPayload(
             eligible: false,
@@ -263,14 +263,16 @@ private enum DefaultReleaseProfileEligibilityEnvelopeFactory {
             requiredPromotionStatus: request.requiredPromotionStatus,
             decisionPacketDigest: request.decisionPacketArtifact.sha256
         )
-        return ReleaseProfileEligibilityEnvelope(
+        return ReleaseProfileEligibilityResult(
             schemaVersion: 1,
             runID: request.runID,
             status: .blocked,
-            metadata: XcircuiteEngineExecutionMetadata(
-                engineID: "release.profile.eligibility",
-                implementationID: "test",
-                implementationVersion: "1.0.0",
+            metadata: try ExecutionProvenance(
+                producer: try ProducerIdentity(
+                    kind: .engine,
+                    identifier: "release.profile.eligibility",
+                    version: "1.0.0"
+                ),
                 startedAt: date,
                 completedAt: date
             ),

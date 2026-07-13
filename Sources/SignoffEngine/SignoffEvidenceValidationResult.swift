@@ -1,20 +1,20 @@
 import Foundation
 import ReleaseCore
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct SignoffEvidenceValidationResult: Sendable, Hashable, Codable {
     public var verifiedEvidenceIDs: [String]
     public var blockedEvidenceIDs: [String]
     public var blockedAxes: [ReleaseSignoffAxis]
     public var diagnosticCodesByAxis: [ReleaseSignoffAxis: [String]]
-    public var diagnostics: [XcircuiteEngineDiagnostic]
+    public var diagnostics: [DesignDiagnostic]
 
     public init(
         verifiedEvidenceIDs: [String] = [],
         blockedEvidenceIDs: [String] = [],
         blockedAxes: [ReleaseSignoffAxis] = [],
         diagnosticCodesByAxis: [ReleaseSignoffAxis: [String]] = [:],
-        diagnostics: [XcircuiteEngineDiagnostic] = []
+        diagnostics: [DesignDiagnostic] = []
     ) {
         self.verifiedEvidenceIDs = verifiedEvidenceIDs
         self.blockedEvidenceIDs = blockedEvidenceIDs

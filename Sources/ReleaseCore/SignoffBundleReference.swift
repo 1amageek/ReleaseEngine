@@ -1,9 +1,9 @@
 import Foundation
 import LogicIR
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct SignoffBundleReference: Sendable, Hashable, Codable {
-    public var artifact: XcircuiteFileReference
+    public var artifact: ArtifactReference
     public var designDigest: String
     public var designProvenance: LogicDesignProvenance?
     public var pdkDigest: String
@@ -12,7 +12,7 @@ public struct SignoffBundleReference: Sendable, Hashable, Codable {
     public var approved: Bool
 
     public init(
-        artifact: XcircuiteFileReference,
+        artifact: ArtifactReference,
         designDigest: String,
         designProvenance: LogicDesignProvenance? = nil,
         pdkDigest: String,

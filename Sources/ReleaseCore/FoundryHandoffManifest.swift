@@ -1,5 +1,6 @@
 import Foundation
-import XcircuitePackage
+import CryptoKit
+import CircuiteFoundation
 
 public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1
@@ -11,7 +12,7 @@ public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
     public var designDigest: String
     public var pdkDigest: String
     public var layoutDigest: String
-    public var artifacts: [XcircuiteFileReference]
+    public var artifacts: [ArtifactReference]
     public var evidenceIDs: [String]
     public var generatedAt: Date
     public var manifestDigest: String
@@ -23,7 +24,7 @@ public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
         designDigest: String,
         pdkDigest: String,
         layoutDigest: String,
-        artifacts: [XcircuiteFileReference],
+        artifacts: [ArtifactReference],
         evidenceIDs: [String],
         generatedAt: Date,
         manifestDigest: String,
@@ -45,7 +46,7 @@ public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
     public func computedManifestDigest() -> String {
         let artifactMaterial = artifacts
             .sorted { $0.path < $1.path }
-            .map { [$0.path, $0.format.rawValue, $0.sha256 ?? "", String($0.byteCount ?? -1)].joined(separator: "|") }
+            .map { [$0.path, $0.format.rawValue, $0.sha256, String($0.byteCount)].joined(separator: "|") }
             .joined(separator: "\n")
         let material = [
             String(schemaVersion),
@@ -59,7 +60,7 @@ public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
             evidenceIDs.sorted().joined(separator: ","),
             ISO8601DateFormatter().string(from: generatedAt),
         ].joined(separator: "\n")
-        return XcircuiteHasher().sha256(data: Data(material.utf8))
+        return SHA256.hash(data: Data(material.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     public var isSelfConsistent: Bool {

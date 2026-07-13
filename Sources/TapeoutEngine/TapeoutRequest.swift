@@ -1,15 +1,15 @@
 import Foundation
-import XcircuitePackage
+import CircuiteFoundation
 import ReleaseCore
 import PhysicalDesignCore
 import PDKCore
 
-public struct TapeoutRequest: XcircuiteEngineRequest {
+public struct TapeoutRequest: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1
 
     public var schemaVersion: Int
     public var runID: String
-    public var inputs: [XcircuiteFileReference]
+    public var inputs: [ArtifactReference]
 
     public var signoffBundle: SignoffBundleReference
     public var physicalDesign: PhysicalDesignReference
@@ -17,20 +17,20 @@ public struct TapeoutRequest: XcircuiteEngineRequest {
     public var streamOut: StreamOutRequest?
     public var foundryID: String
     public var projectRoot: String?
-    public var releaseArtifact: XcircuiteFileReference?
-    public var evidence: [XcircuiteFileReference]
+    public var releaseArtifact: ArtifactReference?
+    public var evidence: [ArtifactReference]
 
     public init(
         runID: String,
-        inputs: [XcircuiteFileReference],
+        inputs: [ArtifactReference],
         signoffBundle: SignoffBundleReference,
         physicalDesign: PhysicalDesignReference,
         pdk: PDKReference,
         streamOut: StreamOutRequest? = nil,
         foundryID: String = "",
         projectRoot: String? = nil,
-        releaseArtifact: XcircuiteFileReference? = nil,
-        evidence: [XcircuiteFileReference] = []
+        releaseArtifact: ArtifactReference? = nil,
+        evidence: [ArtifactReference] = []
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.runID = runID

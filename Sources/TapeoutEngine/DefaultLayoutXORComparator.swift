@@ -1,17 +1,17 @@
 import Foundation
 import ReleaseCore
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct DefaultLayoutXORComparator: LayoutXORComparing {
-    private let verifier: XcircuiteFileReferenceVerifier
+    private let verifier: LocalArtifactVerifier
 
-    public init(verifier: XcircuiteFileReferenceVerifier = XcircuiteFileReferenceVerifier()) {
+    public init(verifier: LocalArtifactVerifier = LocalArtifactVerifier()) {
         self.verifier = verifier
     }
 
     public func compare(
-        source: XcircuiteFileReference,
-        streamed: XcircuiteFileReference,
+        source: ArtifactReference,
+        streamed: ArtifactReference,
         projectRoot: URL?
     ) -> LayoutXORResult {
         guard let projectRoot else {
@@ -23,19 +23,19 @@ public struct DefaultLayoutXORComparator: LayoutXORComparing {
                 message: "A project root is required for exact-stream comparison."
             )
         }
-        let sourceIntegrity = verifier.verify(source, projectRoot: projectRoot)
-        let streamedIntegrity = verifier.verify(streamed, projectRoot: projectRoot)
-        guard sourceIntegrity.status == .verified, streamedIntegrity.status == .verified else {
+        let sourceIntegrity = verifier.verify(source, relativeTo: projectRoot)
+        let streamedIntegrity = verifier.verify(streamed, relativeTo: projectRoot)
+        guard sourceIntegrity.isVerified, streamedIntegrity.isVerified else {
             return LayoutXORResult(
                 status: .blocked,
                 method: "bytewise-exact-stream",
-                sourceDigest: sourceIntegrity.actualSHA256,
-                streamedDigest: streamedIntegrity.actualSHA256,
+                sourceDigest: source.sha256,
+                streamedDigest: streamed.sha256,
                 message: "Exact-stream comparison is blocked until both layout artifacts pass integrity verification."
             )
         }
-        let sourceDigest = sourceIntegrity.actualSHA256
-        let streamedDigest = streamedIntegrity.actualSHA256
+        let sourceDigest = source.sha256
+        let streamedDigest = streamed.sha256
         if sourceDigest == streamedDigest {
             return LayoutXORResult(
                 status: .passed,

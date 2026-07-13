@@ -14,7 +14,7 @@ Status: complete.
 Exit evidence:
 
 - ReleaseEngine owns typed release contracts and native validators.
-- Standard artifacts and `XcircuiteFileReference` remain the source of truth.
+- Standard artifacts and Foundation `ArtifactReference` remain the source of truth.
 - ReleaseEngine does not import Xcircuite or UI code.
 
 ## M1 — Native signoff and tapeout decision path

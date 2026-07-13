@@ -1,11 +1,11 @@
 import Foundation
 import ToolQualification
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct ReleaseSignoffEvidenceReference: Sendable, Hashable, Codable {
     public var evidenceID: String
     public var axis: ReleaseSignoffAxis
-    public var artifact: XcircuiteFileReference
+    public var artifact: ArtifactReference
     public var designDigest: String
     public var pdkDigest: String
     public var toolID: String
@@ -18,7 +18,7 @@ public struct ReleaseSignoffEvidenceReference: Sendable, Hashable, Codable {
     public init(
         evidenceID: String,
         axis: ReleaseSignoffAxis,
-        artifact: XcircuiteFileReference,
+        artifact: ArtifactReference,
         designDigest: String,
         pdkDigest: String,
         toolID: String,

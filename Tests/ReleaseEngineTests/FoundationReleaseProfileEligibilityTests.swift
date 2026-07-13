@@ -210,6 +210,7 @@ struct FoundationReleaseProfileEligibilityTests {
         ArtifactReference(
             locator: ArtifactLocator(
                 location: try ArtifactLocation(workspaceRelativePath: "runs/\(path)"),
+                role: .input,
                 kind: .report,
                 format: .json
             ),

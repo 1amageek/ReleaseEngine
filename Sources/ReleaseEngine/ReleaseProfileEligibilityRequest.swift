@@ -1,13 +1,14 @@
 import Foundation
+import ReleaseCore
 import ToolQualification
-import XcircuitePackage
+import CircuiteFoundation
 
-public struct ReleaseProfileEligibilityRequest: XcircuiteEngineRequest {
+public struct ReleaseProfileEligibilityRequest: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1
 
     public var schemaVersion: Int
     public var runID: String
-    public var inputs: [XcircuiteFileReference]
+    public var inputs: [ArtifactReference]
     public var profileID: String
     public var processProfileID: String
     public var requiredQualificationLevel: ToolQualificationLevel
@@ -16,8 +17,8 @@ public struct ReleaseProfileEligibilityRequest: XcircuiteEngineRequest {
     public var signoff: ReleaseProfileStageEvidence
     public var qualification: ReleaseProfileStageEvidence
     public var tapeout: ReleaseProfileStageEvidence
-    public var decisionPacketArtifact: XcircuiteFileReference
-    public var approval: XcircuiteApprovalRecord
+    public var decisionPacketArtifact: ArtifactReference
+    public var approval: ReleaseApprovalRecord
 
     public init(
         runID: String,
@@ -29,9 +30,9 @@ public struct ReleaseProfileEligibilityRequest: XcircuiteEngineRequest {
         signoff: ReleaseProfileStageEvidence,
         qualification: ReleaseProfileStageEvidence,
         tapeout: ReleaseProfileStageEvidence,
-        decisionPacketArtifact: XcircuiteFileReference,
-        approval: XcircuiteApprovalRecord,
-        inputs: [XcircuiteFileReference]? = nil,
+        decisionPacketArtifact: ArtifactReference,
+        approval: ReleaseApprovalRecord,
+        inputs: [ArtifactReference]? = nil,
         schemaVersion: Int = Self.currentSchemaVersion
     ) {
         self.schemaVersion = schemaVersion

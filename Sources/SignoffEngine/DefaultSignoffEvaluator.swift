@@ -1,8 +1,9 @@
 import Foundation
+import CryptoKit
 import LogicIR
 import ReleaseCore
 import ToolQualification
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct DefaultSignoffEvaluator: SignoffEvaluating {
     private let profileProvider: any SignoffProfileProviding
@@ -21,10 +22,10 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
 
     public func execute(
         _ request: SignoffRequest
-    ) async throws -> XcircuiteEngineResultEnvelope<SignoffPayload> {
+    ) async throws -> SignoffResult {
         let startedAt = now()
         let profile = profileProvider.profile(profileID: request.profileID)
-        let metadata = XcircuiteEngineExecutionMetadata(
+        let metadata = try ExecutionProvenance(
             engineID: "release.signoff",
             implementationID: "native.release.signoff",
             implementationVersion: "1.0.0",
@@ -61,7 +62,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             )
         }
 
-        var diagnostics: [XcircuiteEngineDiagnostic] = []
+        var diagnostics: [DesignDiagnostic] = []
         if profile.designKind != request.designKind {
             diagnostics.append(diagnostic(
                 "SIGNOFF_PROFILE_DESIGN_KIND_MISMATCH",
@@ -205,7 +206,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             .filter { $0.disposition == .blocked }
             .map(\.axis.rawValue)
             .sorted() + (provenanceIssues.isEmpty ? [] : ["provenance"])
-        var status: XcircuiteEngineExecutionStatus = .completed
+        var status: ReleaseExecutionStatus = .completed
         if !blockedAxes.isEmpty || !diagnostics.filter({ $0.severity == .error }).isEmpty {
             status = .blocked
         } else if axisResults.contains(where: { $0.disposition == .failed }) {
@@ -245,9 +246,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             guard let bundleArtifact = request.bundleArtifact,
                   bundleArtifact.kind == .release,
                   !bundleArtifact.path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  isSHA256(bundleArtifact.sha256 ?? ""),
-                  let byteCount = bundleArtifact.byteCount,
-                  byteCount >= 0 else {
+                  isSHA256(bundleArtifact.sha256) else {
                 diagnostics.append(diagnostic(
                     "SIGNOFF_BUNDLE_ARTIFACT_REQUIRED",
                     "An approved signoff result must provide an immutable release artifact reference with digest and byte count.",
@@ -338,8 +337,8 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
         _ waiver: SignoffWaiver,
         request: SignoffRequest,
         records: [ReleaseSignoffEvidenceReference]
-    ) -> (isValid: Bool, diagnostics: [XcircuiteEngineDiagnostic]) {
-        var diagnostics: [XcircuiteEngineDiagnostic] = []
+    ) -> (isValid: Bool, diagnostics: [DesignDiagnostic]) {
+        var diagnostics: [DesignDiagnostic] = []
         func fail(_ code: String, _ message: String) {
             diagnostics.append(diagnostic(code, message, entity: waiver.waiverID))
         }
@@ -361,12 +360,12 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
 
     private func makeEvidenceDigest(_ records: [ReleaseSignoffEvidenceReference]) -> String {
         let material = records.sorted { $0.evidenceID < $1.evidenceID }.map {
-            [$0.evidenceID, $0.axis.rawValue, $0.artifact.path, $0.artifact.sha256 ?? "", $0.designDigest, $0.pdkDigest, $0.toolID, $0.toolDigest].joined(separator: "|")
+            [$0.evidenceID, $0.axis.rawValue, $0.artifact.path, $0.artifact.sha256, $0.designDigest, $0.pdkDigest, $0.toolID, $0.toolDigest].joined(separator: "|")
         }.joined(separator: "\n")
-        return XcircuiteHasher().sha256(data: Data(material.utf8))
+        return SHA256.hash(data: Data(material.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
-    private func uniqueArtifacts(_ artifacts: [XcircuiteFileReference]) -> [XcircuiteFileReference] {
+    private func uniqueArtifacts(_ artifacts: [ArtifactReference]) -> [ArtifactReference] {
         Array(Set(artifacts)).sorted { $0.path < $1.path }
     }
 
@@ -376,8 +375,8 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
         }
     }
 
-    private func diagnostic(_ code: String, _ message: String, entity: String?) -> XcircuiteEngineDiagnostic {
-        XcircuiteEngineDiagnostic(
+    private func diagnostic(_ code: String, _ message: String, entity: String?) -> DesignDiagnostic {
+        DesignDiagnostic(
             severity: .error,
             code: code,
             message: message,
@@ -388,13 +387,13 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
 
     private func envelope(
         request: SignoffRequest,
-        status: XcircuiteEngineExecutionStatus,
-        diagnostics: [XcircuiteEngineDiagnostic],
-        artifacts: [XcircuiteFileReference],
-        metadata: XcircuiteEngineExecutionMetadata,
+        status: ReleaseExecutionStatus,
+        diagnostics: [DesignDiagnostic],
+        artifacts: [ArtifactReference],
+        metadata: ExecutionProvenance,
         payload: SignoffPayload
-    ) -> XcircuiteEngineResultEnvelope<SignoffPayload> {
-        XcircuiteEngineResultEnvelope(
+    ) -> SignoffResult {
+        SignoffResult(
             schemaVersion: SignoffRequest.currentSchemaVersion,
             runID: request.runID,
             status: status,
@@ -407,9 +406,9 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
 
     private func blockedEnvelope(
         request: SignoffRequest,
-        metadata: XcircuiteEngineExecutionMetadata,
-        diagnostics: [XcircuiteEngineDiagnostic]
-    ) -> XcircuiteEngineResultEnvelope<SignoffPayload> {
+        metadata: ExecutionProvenance,
+        diagnostics: [DesignDiagnostic]
+    ) -> SignoffResult {
         envelope(
             request: request,
             status: .blocked,

@@ -1,5 +1,5 @@
 import Foundation
-import XcircuitePackage
+import CircuiteFoundation
 import ReleaseCore
 
 public struct SignoffPayload: Sendable, Hashable, Codable {

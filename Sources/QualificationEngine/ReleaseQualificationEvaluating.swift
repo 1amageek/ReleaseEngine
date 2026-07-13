@@ -1,8 +1,8 @@
 import Foundation
-import XcircuitePackage
+import CircuiteFoundation
 
 public protocol ReleaseQualificationEvaluating: Sendable {
     func execute(
         _ request: ReleaseQualificationRequest
-    ) async throws -> XcircuiteEngineResultEnvelope<ReleaseQualificationPayload>
+    ) async throws -> ReleaseQualificationResult
 }

@@ -1,7 +1,7 @@
 import Foundation
 import ReleaseCore
 import ToolQualification
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct DefaultSignoffProfileProvider: SignoffProfileProviding {
     public init() {}

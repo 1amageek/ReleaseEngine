@@ -1,5 +1,5 @@
 import Foundation
-import XcircuitePackage
+import CircuiteFoundation
 import ReleaseCore
 import PhysicalDesignCore
 import PDKCore
@@ -7,5 +7,5 @@ import PDKCore
 public protocol TapeoutPackaging: Sendable {
     func execute(
         _ request: TapeoutRequest
-    ) async throws -> XcircuiteEngineResultEnvelope<TapeoutPayload>
+    ) async throws -> TapeoutResult
 }

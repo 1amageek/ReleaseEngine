@@ -1,12 +1,12 @@
 import Foundation
 import ReleaseCore
 import ToolQualification
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
-    private let verifier: XcircuiteFileReferenceVerifier
+    private let verifier: LocalArtifactVerifier
 
-    public init(verifier: XcircuiteFileReferenceVerifier = XcircuiteFileReferenceVerifier()) {
+    public init(verifier: LocalArtifactVerifier = LocalArtifactVerifier()) {
         self.verifier = verifier
     }
 
@@ -21,7 +21,7 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
         var blockedIDs: [String] = []
         var blockedAxes = Set<ReleaseSignoffAxis>()
         var codesByAxis: [ReleaseSignoffAxis: [String]] = [:]
-        var diagnostics: [XcircuiteEngineDiagnostic] = []
+        var diagnostics: [DesignDiagnostic] = []
         var seenIDs = Set<String>()
 
         func add(
@@ -30,7 +30,7 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
             axis: ReleaseSignoffAxis?,
             entity: String?
         ) {
-            diagnostics.append(XcircuiteEngineDiagnostic(
+            diagnostics.append(DesignDiagnostic(
                 severity: .error,
                 code: code,
                 message: message,
@@ -142,12 +142,12 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
                 recordBlocked = true
                 add("EVIDENCE_PATH_REQUIRED", "Evidence artifact path must be project-relative and non-empty.", axis: axis, entity: record.evidenceID)
             } else {
-                let integrity = verifier.verify(record.artifact, projectRoot: projectRoot)
-                if integrity.status != .verified {
+                let integrity = verifier.verify(record.artifact, relativeTo: projectRoot)
+                if !integrity.isVerified {
                     recordBlocked = true
                     add(
                         "EVIDENCE_ARTIFACT_INTEGRITY_FAILED",
-                        integrity.message,
+                        integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "),
                         axis: axis,
                         entity: record.evidenceID
                     )

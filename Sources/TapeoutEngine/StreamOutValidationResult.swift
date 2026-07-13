@@ -1,14 +1,14 @@
 import Foundation
 import ReleaseCore
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct StreamOutValidationResult: Sendable, Hashable, Codable {
     public var status: LayoutXORStatus
-    public var diagnostics: [XcircuiteEngineDiagnostic]
+    public var diagnostics: [DesignDiagnostic]
 
     public init(
         status: LayoutXORStatus,
-        diagnostics: [XcircuiteEngineDiagnostic] = []
+        diagnostics: [DesignDiagnostic] = []
     ) {
         self.status = status
         self.diagnostics = diagnostics

@@ -1,11 +1,11 @@
 import Foundation
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct StreamOutManifest: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1
 
     public var schemaVersion: Int
-    public var streamedArtifact: XcircuiteFileReference
+    public var streamedArtifact: ArtifactReference
     public var topCell: String
     public var unitsPerDatabaseUnit: Double
     public var layerMap: [String: Int]
@@ -15,7 +15,7 @@ public struct StreamOutManifest: Sendable, Hashable, Codable {
     public var generatedBy: String
 
     public init(
-        streamedArtifact: XcircuiteFileReference,
+        streamedArtifact: ArtifactReference,
         topCell: String,
         unitsPerDatabaseUnit: Double,
         layerMap: [String: Int],

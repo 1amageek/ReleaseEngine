@@ -1,9 +1,9 @@
 import Foundation
-import XcircuitePackage
+import CircuiteFoundation
 import ReleaseCore
 
 public protocol SignoffEvaluating: Sendable {
     func execute(
         _ request: SignoffRequest
-    ) async throws -> XcircuiteEngineResultEnvelope<SignoffPayload>
+    ) async throws -> SignoffResult
 }

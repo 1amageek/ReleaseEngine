@@ -1,21 +1,21 @@
 import Foundation
 import ReleaseCore
 import ToolQualification
-import XcircuitePackage
+import CircuiteFoundation
 
-public struct ReleaseQualificationRequest: XcircuiteEngineRequest {
+public struct ReleaseQualificationRequest: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1
 
     public var schemaVersion: Int
     public var runID: String
-    public var inputs: [XcircuiteFileReference]
+    public var inputs: [ArtifactReference]
     public var projectRoot: String?
     public var processProfileID: String
-    public var suiteArtifact: XcircuiteFileReference
-    public var qualificationReportArtifact: XcircuiteFileReference
-    public var corpusSpecArtifacts: [XcircuiteFileReference]
-    public var domainReportArtifacts: [XcircuiteFileReference]
-    public var evidenceArtifacts: [XcircuiteFileReference]
+    public var suiteArtifact: ArtifactReference
+    public var qualificationReportArtifact: ArtifactReference
+    public var corpusSpecArtifacts: [ArtifactReference]
+    public var domainReportArtifacts: [ArtifactReference]
+    public var evidenceArtifacts: [ArtifactReference]
     public var toolEvidence: [ToolEvidence]
     public var policy: ReleaseQualificationPolicy
 
@@ -23,11 +23,11 @@ public struct ReleaseQualificationRequest: XcircuiteEngineRequest {
         runID: String,
         projectRoot: String?,
         processProfileID: String,
-        suiteArtifact: XcircuiteFileReference,
-        qualificationReportArtifact: XcircuiteFileReference,
-        corpusSpecArtifacts: [XcircuiteFileReference] = [],
-        domainReportArtifacts: [XcircuiteFileReference],
-        evidenceArtifacts: [XcircuiteFileReference],
+        suiteArtifact: ArtifactReference,
+        qualificationReportArtifact: ArtifactReference,
+        corpusSpecArtifacts: [ArtifactReference] = [],
+        domainReportArtifacts: [ArtifactReference],
+        evidenceArtifacts: [ArtifactReference],
         toolEvidence: [ToolEvidence],
         policy: ReleaseQualificationPolicy,
         schemaVersion: Int = Self.currentSchemaVersion
@@ -70,14 +70,14 @@ public struct ReleaseQualificationRequest: XcircuiteEngineRequest {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
         runID = try container.decode(String.self, forKey: .runID)
-        inputs = try container.decodeIfPresent([XcircuiteFileReference].self, forKey: .inputs) ?? []
+        inputs = try container.decodeIfPresent([ArtifactReference].self, forKey: .inputs) ?? []
         projectRoot = try container.decodeIfPresent(String.self, forKey: .projectRoot)
         processProfileID = try container.decode(String.self, forKey: .processProfileID)
-        suiteArtifact = try container.decode(XcircuiteFileReference.self, forKey: .suiteArtifact)
-        qualificationReportArtifact = try container.decode(XcircuiteFileReference.self, forKey: .qualificationReportArtifact)
-        corpusSpecArtifacts = try container.decodeIfPresent([XcircuiteFileReference].self, forKey: .corpusSpecArtifacts) ?? []
-        domainReportArtifacts = try container.decodeIfPresent([XcircuiteFileReference].self, forKey: .domainReportArtifacts) ?? []
-        evidenceArtifacts = try container.decodeIfPresent([XcircuiteFileReference].self, forKey: .evidenceArtifacts) ?? []
+        suiteArtifact = try container.decode(ArtifactReference.self, forKey: .suiteArtifact)
+        qualificationReportArtifact = try container.decode(ArtifactReference.self, forKey: .qualificationReportArtifact)
+        corpusSpecArtifacts = try container.decodeIfPresent([ArtifactReference].self, forKey: .corpusSpecArtifacts) ?? []
+        domainReportArtifacts = try container.decodeIfPresent([ArtifactReference].self, forKey: .domainReportArtifacts) ?? []
+        evidenceArtifacts = try container.decodeIfPresent([ArtifactReference].self, forKey: .evidenceArtifacts) ?? []
         toolEvidence = try container.decodeIfPresent([ToolEvidence].self, forKey: .toolEvidence) ?? []
         policy = try container.decode(ReleaseQualificationPolicy.self, forKey: .policy)
     }

@@ -1,6 +1,6 @@
 import Foundation
 import ReleaseCore
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct ReleaseQualificationDomainResult: Sendable, Hashable, Codable {
     public var laneID: String
@@ -15,9 +15,9 @@ public struct ReleaseQualificationDomainResult: Sendable, Hashable, Codable {
     public var oracleAgreementRate: Double?
     public var durationBudgetPassRate: Double?
     public var failureCodes: [String]
-    public var corpusArtifact: XcircuiteFileReference?
-    public var reportArtifact: XcircuiteFileReference?
-    public var evidenceArtifact: XcircuiteFileReference?
+    public var corpusArtifact: ArtifactReference?
+    public var reportArtifact: ArtifactReference?
+    public var evidenceArtifact: ArtifactReference?
 
     public init(
         laneID: String,
@@ -32,9 +32,9 @@ public struct ReleaseQualificationDomainResult: Sendable, Hashable, Codable {
         oracleAgreementRate: Double?,
         durationBudgetPassRate: Double?,
         failureCodes: [String] = [],
-        corpusArtifact: XcircuiteFileReference? = nil,
-        reportArtifact: XcircuiteFileReference? = nil,
-        evidenceArtifact: XcircuiteFileReference? = nil
+        corpusArtifact: ArtifactReference? = nil,
+        reportArtifact: ArtifactReference? = nil,
+        evidenceArtifact: ArtifactReference? = nil
     ) {
         self.laneID = laneID
         self.domain = domain

@@ -1,5 +1,5 @@
 import Foundation
-import XcircuitePackage
+import CircuiteFoundation
 import ReleaseCore
 import PhysicalDesignCore
 import PDKCore
@@ -8,7 +8,7 @@ public struct TapeoutPayload: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1
 
     public var schemaVersion: Int
-    public var releaseArtifact: XcircuiteFileReference?
+    public var releaseArtifact: ArtifactReference?
     public var checksum: String?
     public var approved: Bool
     public var signoffBundleDigest: String?
@@ -19,7 +19,7 @@ public struct TapeoutPayload: Sendable, Hashable, Codable {
     public var handoff: FoundryHandoffManifest?
 
     public init(
-        releaseArtifact: XcircuiteFileReference?,
+        releaseArtifact: ArtifactReference?,
         checksum: String?,
         approved: Bool = false,
         signoffBundleDigest: String? = nil,

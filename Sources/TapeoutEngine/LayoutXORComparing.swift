@@ -1,11 +1,11 @@
 import Foundation
 import ReleaseCore
-import XcircuitePackage
+import CircuiteFoundation
 
 public protocol LayoutXORComparing: Sendable {
     func compare(
-        source: XcircuiteFileReference,
-        streamed: XcircuiteFileReference,
+        source: ArtifactReference,
+        streamed: ArtifactReference,
         projectRoot: URL?
     ) -> LayoutXORResult
 }

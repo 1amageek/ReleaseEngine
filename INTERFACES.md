@@ -6,7 +6,7 @@
 public protocol DomainExecuting: Sendable {
     func execute(
         _ request: DomainRequest
-    ) async throws -> XcircuiteEngineResultEnvelope<DomainPayload>
+    ) async throws -> DomainResult
 }
 ```
 
@@ -39,15 +39,9 @@ Umbrella API.
 - Preserve cancellation as `cancelled`.
 - Do not swallow parser, process or persistence failures.
 
-## Xcircuite adapter
+## Composition
 
-The adapter must:
-
-1. resolve project-relative references through XcircuitePackage;
-2. verify input digests;
-3. evaluate ToolQualification requirements;
-4. invoke the injected engine protocol;
-5. persist every returned artifact;
-6. map diagnostics and status to FlowStageResult;
-7. attach design, PDK and tool provenance;
-8. leave approval and resume handling to DesignFlowKernel.
+Xcircuite invokes these protocols directly and persists returned
+`ArtifactReference` values in its workspace store. DesignFlowKernel owns flow
+status, approval and resume; ToolQualification owns capability and trust
+decisions. Engines only return domain results, diagnostics and provenance.

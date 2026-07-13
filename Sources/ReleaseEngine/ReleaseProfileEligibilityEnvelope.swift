@@ -1,4 +1,5 @@
 import Foundation
-import XcircuitePackage
+import CircuiteFoundation
 
-public typealias ReleaseProfileEligibilityEnvelope = XcircuiteEngineResultEnvelope<ReleaseProfileEligibilityPayload>
+@available(*, deprecated, renamed: "ReleaseProfileEligibilityResult")
+public typealias ReleaseProfileEligibilityEnvelope = ReleaseProfileEligibilityResult

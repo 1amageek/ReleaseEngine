@@ -1,6 +1,6 @@
 import Foundation
 import PhysicalDesignCore
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct StreamOutRequest: Sendable, Hashable, Codable {
     public static let currentSchemaVersion = 1

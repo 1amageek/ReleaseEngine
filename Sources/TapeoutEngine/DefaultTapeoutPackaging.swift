@@ -2,18 +2,18 @@ import Foundation
 import PDKCore
 import PhysicalDesignCore
 import ReleaseCore
-import XcircuitePackage
+import CircuiteFoundation
 
 public struct DefaultTapeoutPackaging: TapeoutPackaging {
     private let streamOutValidator: any StreamOutValidating
     private let xorComparator: any LayoutXORComparing
-    private let verifier: XcircuiteFileReferenceVerifier
+    private let verifier: LocalArtifactVerifier
     private let now: @Sendable () -> Date
 
     public init(
         streamOutValidator: any StreamOutValidating = DefaultStreamOutValidator(),
         xorComparator: any LayoutXORComparing = DefaultLayoutXORComparator(),
-        verifier: XcircuiteFileReferenceVerifier = XcircuiteFileReferenceVerifier(),
+        verifier: LocalArtifactVerifier = LocalArtifactVerifier(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.streamOutValidator = streamOutValidator
@@ -24,23 +24,23 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
 
     public func execute(
         _ request: TapeoutRequest
-    ) async throws -> XcircuiteEngineResultEnvelope<TapeoutPayload> {
+    ) async throws -> TapeoutResult {
         let startedAt = now()
-        let metadata = XcircuiteEngineExecutionMetadata(
+        let metadata = try ExecutionProvenance(
             engineID: "release.tapeout",
             implementationID: "native.release.tapeout",
             implementationVersion: "1.0.0",
             startedAt: startedAt,
             completedAt: now()
         )
-        var diagnostics: [XcircuiteEngineDiagnostic] = []
-        var status: XcircuiteEngineExecutionStatus = .completed
+        var diagnostics: [DesignDiagnostic] = []
+        var status: ReleaseExecutionStatus = .completed
         var streamOutManifest: StreamOutManifest?
         var xorResult: LayoutXORResult?
         var handoff: FoundryHandoffManifest?
 
         func add(_ code: String, _ message: String, entity: String?, blocked: Bool) {
-            diagnostics.append(XcircuiteEngineDiagnostic(
+            diagnostics.append(DesignDiagnostic(
                 severity: .error,
                 code: code,
                 message: message,
@@ -83,7 +83,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
         if bundle.finalLayoutDigest != request.physicalDesign.layoutDigest {
             add("SIGNOFF_LAYOUT_BINDING_MISMATCH", "Signoff bundle is not bound to the exact final layout revision.", entity: bundle.artifact.path, blocked: false)
         }
-        if bundle.artifact.sha256 == nil || bundle.artifact.byteCount == nil || bundle.artifact.path.isEmpty {
+        if bundle.artifact.byteCount == 0 || bundle.artifact.path.isEmpty {
             add("SIGNOFF_BUNDLE_ARTIFACT_INCOMPLETE", "Signoff bundle artifact reference must include path, SHA-256, and byte count.", entity: bundle.artifact.path, blocked: true)
         }
         if request.pdk.manifest.kind != .technology {
@@ -119,7 +119,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
             if streamOut.requirements.requireExactStreamIdentity {
                 add("LAYOUT_XOR_FAILED", xorResult?.message ?? "Layout XOR comparison failed.", entity: request.runID, blocked: false)
             } else {
-                diagnostics.append(XcircuiteEngineDiagnostic(
+                diagnostics.append(DesignDiagnostic(
                     severity: .warning,
                     code: "LAYOUT_XOR_GEOMETRY_NOT_QUALIFIED",
                     message: "Exact byte identity was not required, and no qualified geometric XOR comparator is installed.",
@@ -130,18 +130,18 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
         }
 
         if let projectURL {
-            let bundleIntegrity = verifier.verify(bundle.artifact, projectRoot: projectURL)
-            if bundleIntegrity.status != .verified {
-                add("SIGNOFF_BUNDLE_INTEGRITY_FAILED", bundleIntegrity.message, entity: bundle.artifact.path, blocked: true)
+            let bundleIntegrity = verifier.verify(bundle.artifact, relativeTo: projectURL)
+            if !bundleIntegrity.isVerified {
+                add("SIGNOFF_BUNDLE_INTEGRITY_FAILED", bundleIntegrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "), entity: bundle.artifact.path, blocked: true)
             }
-            let pdkIntegrity = verifier.verify(request.pdk.manifest, projectRoot: projectURL)
-            if pdkIntegrity.status != .verified {
-                add("PDK_MANIFEST_INTEGRITY_FAILED", pdkIntegrity.message, entity: request.pdk.manifest.path, blocked: true)
+            let pdkIntegrity = verifier.verify(request.pdk.manifest, relativeTo: projectURL)
+            if !pdkIntegrity.isVerified {
+                add("PDK_MANIFEST_INTEGRITY_FAILED", pdkIntegrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "), entity: request.pdk.manifest.path, blocked: true)
             }
             for evidence in request.evidence {
-                let integrity = verifier.verify(evidence, projectRoot: projectURL)
-                if integrity.status != .verified {
-                    add("HANDOFF_EVIDENCE_INTEGRITY_FAILED", integrity.message, entity: evidence.path, blocked: true)
+                let integrity = verifier.verify(evidence, relativeTo: projectURL)
+                if !integrity.isVerified {
+                    add("HANDOFF_EVIDENCE_INTEGRITY_FAILED", integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "), entity: evidence.path, blocked: true)
                 }
             }
         } else {
@@ -151,8 +151,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
         guard let releaseArtifact = request.releaseArtifact,
               releaseArtifact.kind == .release,
               !releaseArtifact.path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              releaseArtifact.sha256 != nil,
-              releaseArtifact.byteCount != nil else {
+              releaseArtifact.byteCount > 0 else {
             add("TAPEOUT_RELEASE_ARTIFACT_REQUIRED", "Tapeout requires an immutable release artifact reference with digest and byte count.", entity: request.runID, blocked: true)
             return envelope(request: request, status: status, diagnostics: diagnostics, metadata: metadata, payload: TapeoutPayload(
                 releaseArtifact: nil,
@@ -168,7 +167,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
 
         if status == .completed {
             let generatedAt = now()
-            let evidenceIDs = request.evidence.compactMap { $0.artifactID ?? $0.path }
+            let evidenceIDs = request.evidence.map(\.artifactID)
             let artifacts = uniqueArtifacts([
                 bundle.artifact,
                 request.physicalDesign.layoutArtifact,
@@ -232,19 +231,19 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
         }
     }
 
-    private func uniqueArtifacts(_ artifacts: [XcircuiteFileReference]) -> [XcircuiteFileReference] {
+    private func uniqueArtifacts(_ artifacts: [ArtifactReference]) -> [ArtifactReference] {
         Array(Set(artifacts)).sorted { $0.path < $1.path }
     }
 
     private func envelope(
         request: TapeoutRequest,
-        status: XcircuiteEngineExecutionStatus,
-        diagnostics: [XcircuiteEngineDiagnostic],
-        artifacts: [XcircuiteFileReference] = [],
-        metadata: XcircuiteEngineExecutionMetadata,
+        status: ReleaseExecutionStatus,
+        diagnostics: [DesignDiagnostic],
+        artifacts: [ArtifactReference] = [],
+        metadata: ExecutionProvenance,
         payload: TapeoutPayload
-    ) -> XcircuiteEngineResultEnvelope<TapeoutPayload> {
-        XcircuiteEngineResultEnvelope(
+    ) -> TapeoutResult {
+        TapeoutResult(
             schemaVersion: TapeoutRequest.currentSchemaVersion,
             runID: request.runID,
             status: status,

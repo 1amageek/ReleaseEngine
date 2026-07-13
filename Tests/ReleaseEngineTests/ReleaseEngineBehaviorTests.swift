@@ -7,7 +7,7 @@ import SignoffEngine
 import TapeoutEngine
 import Testing
 import ToolQualification
-import XcircuitePackage
+import CircuiteFoundation
 
 @Suite("ReleaseEngine behavior")
 struct ReleaseEngineBehaviorTests {
@@ -40,7 +40,7 @@ struct ReleaseEngineBehaviorTests {
         let result = try await DefaultSignoffEvaluator().execute(request)
         #expect(result.status == .blocked)
         #expect(result.payload.approved == false)
-        #expect(result.diagnostics.contains { $0.code == "EVIDENCE_RECORDS_REQUIRED" })
+        #expect(result.diagnostics.contains { $0.code.rawValue == "EVIDENCE_RECORDS_REQUIRED" })
     }
 
     @Test("signoff blocks an invalid design lineage before approval")
@@ -64,7 +64,7 @@ struct ReleaseEngineBehaviorTests {
         let result = try await DefaultSignoffEvaluator().execute(request)
 
         #expect(result.status == .blocked)
-        #expect(result.diagnostics.contains { $0.code == "DESIGN_PROVENANCE_INPUT_DIGEST_MISMATCH" })
+        #expect(result.diagnostics.contains { $0.code.rawValue == "DESIGN_PROVENANCE_INPUT_DIGEST_MISMATCH" })
         #expect(result.payload.blockedAxes.contains("provenance"))
     }
 
@@ -177,7 +177,7 @@ struct ReleaseEngineBehaviorTests {
         let result = try await DefaultSignoffEvaluator(now: { Date(timeIntervalSince1970: 2_000) }).execute(request)
         #expect(result.status == .blocked)
         #expect(result.payload.approved == false)
-        #expect(result.diagnostics.contains { $0.code == "WAIVER_EXPIRED_OR_INVALID" })
+        #expect(result.diagnostics.contains { $0.code.rawValue == "WAIVER_EXPIRED_OR_INVALID" })
     }
 
     @Test("tapeout requires exact signoff, PDK, layout, and stream-out bindings")
@@ -190,7 +190,7 @@ struct ReleaseEngineBehaviorTests {
         let layout = try Self.makeArtifact(root: root, relativePath: "layout/top.gds", data: layoutData, kind: .layout, format: .gdsii)
         let bundleArtifact = try Self.makeArtifact(root: root, relativePath: "release/signoff.json", data: Data("bundle".utf8), kind: .release, format: .json)
         let releaseArtifact = try Self.makeArtifact(root: root, relativePath: "release/tapeout.json", data: Data("handoff".utf8), kind: .release, format: .json)
-        let physical = PhysicalDesignReference(layoutArtifact: layout, topCell: "TOP", layoutDigest: layout.sha256 ?? "")
+        let physical = PhysicalDesignReference(layoutArtifact: layout, topCell: "TOP", layoutDigest: layout.sha256)
         let pdk = PDKReference(manifest: pdkManifest, processID: "sky130", version: "1", digest: Self.pdkDigest)
         let requirements = TapeoutReleaseRequirements(
             expectedTopCell: "TOP",
@@ -243,9 +243,9 @@ struct ReleaseEngineBehaviorTests {
 
     @Test("tapeout blocks when stream-out integrity is unavailable")
     func tapeoutBlocksMissingProjectRoot() async throws {
-        let layout = XcircuiteFileReference(path: "layout/top.gds", kind: .layout, format: .gdsii, sha256: String(repeating: "a", count: 64), byteCount: 10)
-        let physical = PhysicalDesignReference(layoutArtifact: layout, topCell: "TOP", layoutDigest: layout.sha256 ?? "")
-        let bundle = XcircuiteFileReference(path: "release/signoff.json", kind: .release, format: .json, sha256: String(repeating: "b", count: 64), byteCount: 1)
+        let layout = makeTestArtifactReference(path: "layout/top.gds", kind: .layout, format: .gdsii, sha256: String(repeating: "a", count: 64), byteCount: 10)
+        let physical = PhysicalDesignReference(layoutArtifact: layout, topCell: "TOP", layoutDigest: layout.sha256)
+        let bundle = makeTestArtifactReference(path: "release/signoff.json", kind: .release, format: .json, sha256: String(repeating: "b", count: 64), byteCount: 1)
         let request = TapeoutRequest(
             runID: "blocked-tapeout",
             inputs: [],
@@ -257,11 +257,11 @@ struct ReleaseEngineBehaviorTests {
         )
         let result = try await DefaultTapeoutPackaging().execute(request)
         #expect(result.status == .blocked)
-        #expect(result.diagnostics.contains { $0.code == "STREAM_OUT_REQUIRED" })
+        #expect(result.diagnostics.contains { $0.code.rawValue == "STREAM_OUT_REQUIRED" })
     }
 
-    private static func makeReportArtifacts(root: URL) throws -> [ReleaseSignoffAxis: XcircuiteFileReference] {
-        var result: [ReleaseSignoffAxis: XcircuiteFileReference] = [:]
+    private static func makeReportArtifacts(root: URL) throws -> [ReleaseSignoffAxis: ArtifactReference] {
+        var result: [ReleaseSignoffAxis: ArtifactReference] = [:]
         for axis in ReleaseSignoffAxis.allCases {
             result[axis] = try makeArtifact(
                 root: root,
@@ -278,9 +278,9 @@ struct ReleaseEngineBehaviorTests {
         root: URL,
         relativePath: String,
         data: Data,
-        kind: XcircuiteFileKind,
-        format: XcircuiteFileFormat
-    ) throws -> XcircuiteFileReference {
+        kind: ArtifactKind,
+        format: ArtifactFormat
+    ) throws -> ArtifactReference {
         let url = root.appending(path: relativePath)
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -288,12 +288,12 @@ struct ReleaseEngineBehaviorTests {
         } catch {
             throw error
         }
-        return XcircuiteFileReference(
+        return makeTestArtifactReference(
             artifactID: relativePath.replacingOccurrences(of: "/", with: "-"),
             path: relativePath,
             kind: kind,
             format: format,
-            sha256: XcircuiteHasher().sha256(data: data),
+            sha256: SHA256ContentDigester().sha256(data: data),
             byteCount: Int64(data.count)
         )
     }
