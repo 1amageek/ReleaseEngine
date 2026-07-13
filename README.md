@@ -101,4 +101,4 @@ See `QUALIFICATION.md` for the capability boundary and retained-evidence policy.
 
 ## Continuous integration
 
-`.github/workflows/release-engine.yml` builds the local package graph, runs the complete test target, replays the checked-in retained qualification fixture, and uploads the resulting JSON evidence with a 90-day artifact retention policy. DesignFlowKernel remains the owner of the hash-chained retention index and release envelope; its commands must be wired into the platform-level CI workflow before a production release is considered eligible.
+`.github/workflows/release-engine.yml` builds the local package graph, runs the complete test target, replays the checked-in retained qualification fixture, and uploads the resulting JSON evidence with a 90-day artifact retention policy. DesignFlowKernel owns the hash-chained retention index and release envelope; its published retention workflow executes both CLI commands and uploads the run artifacts. A successful workflow proves reproducibility, not foundry approval.

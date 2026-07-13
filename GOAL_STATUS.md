@@ -2,7 +2,7 @@
 
 ## Current state
 
-**Native contract path, structured oracle correlation, process-scoped promotion, release-profile eligibility, and multi-stage approval/resume are implemented. CI-hosted DesignFlow retention publication and final process/foundry evidence remain explicit release gates.**
+**Native contract path, structured oracle correlation, process-scoped promotion, retention CI, release-profile eligibility, and multi-stage approval/resume are implemented. Final process/foundry evidence remains an explicit fail-closed release gate.**
 
 | Maturity gate | Status | Evidence |
 |---|---|---|
@@ -18,7 +18,7 @@
 | Process qualification | Promotion contract implemented | Requires fresh PDK-scoped evidence and explicit production approval |
 | Xcircuite stage adapter | Implemented for signoff, qualification, tapeout and release-profile eligibility | Release stage executors, runtime specs, descriptors and persisted raw envelopes |
 | End-to-end flow evidence | Native + structured oracle + multi-stage approval/resume path complete | ReleaseEngine eligibility suite, DesignFlowKernel retention/envelope suite, Xcircuite release lineage suite |
-| Release readiness | Evidence-gated | CI retention-index publication and process/foundry approval are never inferred |
+| Release readiness | Evidence-gated | Process/foundry approval is never inferred |
 
 ## Function status
 
@@ -61,7 +61,7 @@ The package goal is complete only when every P0 function has a concrete backend,
 
 - No external-tool invocation is bundled; native engines consume structured evidence.
 - External oracle execution and production process qualification are not manufactured by this package.
-- CI-hosted DesignFlow retention-index publication and final process/foundry evidence remain open.
+- Final process/foundry evidence remains external by design; a missing or stale approval keeps release-profile eligibility blocked.
 - `release-profile` is now a native and headless integration contract; it returns blocked until the supplied process-scoped evidence and human approval satisfy policy.
 - Xcircuite remains responsible for external backend execution and flow orchestration; release stage adapters persist raw envelopes and map typed status/gates.
 

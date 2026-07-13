@@ -97,7 +97,7 @@ M4 boundary:
 
 ## M5 — Retention CI and release envelope
 
-Status: partially complete.
+Status: complete for the retained CI and release-envelope contract.
 
 Exit evidence:
 
@@ -112,11 +112,11 @@ Current evidence:
 - `design-flow validate-retention-index` exposes the same validation contract to Agent and CI callers.
 - Release envelopes consume and content-validate both the raw ReleaseEngine qualification result and the retention index.
 - ReleaseEngine owns a repository CI workflow that builds the local package graph, runs its full test target, replays the retained qualification fixture, and uploads the resulting JSON artifact with a 90-day retention setting.
+- DesignFlowKernel is published as `1amageek/DesignFlowKernel`; workflow run `29216074024` passed the CLI build, retention regression, retention-index build/validation, and 90-day artifact upload steps.
 
 Remaining exit evidence:
 
-- The platform-level CI workflow must execute the DesignFlowKernel retention build/validation commands against the retained corpus and publish the resulting run artifacts.
-- CI artifact upload and retention policy configuration must be verified in the target hosting environment.
+- A production release still requires the selected process profile's external qualification and foundry approval evidence; native CI success does not manufacture either decision.
 
 ## M6 — Xcircuite headless flow and human approval/resume
 
