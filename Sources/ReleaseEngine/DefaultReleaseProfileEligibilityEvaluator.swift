@@ -10,7 +10,7 @@ public struct DefaultReleaseProfileEligibilityEvaluator: ReleaseProfileEligibili
 
     public func execute(
         _ request: ReleaseProfileEligibilityRequest
-    ) async throws -> ReleaseProfileEligibilityEnvelope {
+    ) async throws -> ReleaseProfileEligibilityResult {
         let startedAt = Date()
         var failures: [String] = []
         func add(_ code: String) {

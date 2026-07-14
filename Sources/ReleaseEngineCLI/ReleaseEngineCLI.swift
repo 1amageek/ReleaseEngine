@@ -80,7 +80,7 @@ struct ReleaseEngineCLI {
         return try await DefaultRetainedQualificationEvaluator().execute(request)
     }
 
-    private static func executeEligibility(arguments: [String]) async throws -> ReleaseProfileEligibilityEnvelope {
+    private static func executeEligibility(arguments: [String]) async throws -> ReleaseProfileEligibilityResult {
         let data = try inputData(arguments: arguments)
         let request = try decoder.decode(ReleaseProfileEligibilityRequest.self, from: data)
         return try await DefaultReleaseProfileEligibilityEvaluator().execute(request)
