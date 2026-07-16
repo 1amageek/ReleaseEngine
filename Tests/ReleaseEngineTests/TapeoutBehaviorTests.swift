@@ -89,7 +89,7 @@ private struct TapeoutFixture {
             profileID: "digital",
             designDigest: designDigest,
             pdkDigest: pdkDigest,
-            finalLayoutDigest: layout.sha256,
+            finalLayoutDigest: layout.digest.hexadecimalValue,
             axisResults: ReleaseSignoffAxis.allCases.map {
                 SignoffAxisResult(axis: $0, disposition: .passed, evidenceIDs: ["e-\($0.rawValue)"], reason: "passed")
             },
@@ -104,7 +104,11 @@ private struct TapeoutFixture {
             format: .json,
             root: root
         )
-        let physical = PhysicalDesignReference(layoutArtifact: layout, topCell: "TOP", layoutDigest: layout.sha256)
+        let physical = PhysicalDesignReference(
+            layoutArtifact: layout,
+            topCell: "TOP",
+            layoutDigest: layout.digest.hexadecimalValue
+        )
         let pdk = PDKReference(manifest: pdkManifest, processID: "process", version: "1", digest: pdkDigest)
         let requirements = TapeoutReleaseRequirements(
             expectedTopCell: "TOP",
@@ -131,10 +135,10 @@ private struct TapeoutFixture {
         let unsigned = FoundryHandoffManifest(
             releaseID: "tapeout-tapeout",
             foundryID: "foundry",
-            signoffBundleArtifactDigest: bundleArtifact.sha256,
+            signoffBundleArtifactDigest: bundleArtifact.digest.hexadecimalValue,
             designDigest: designDigest,
             pdkDigest: pdkDigest,
-            layoutDigest: layout.sha256,
+            layoutDigest: layout.digest.hexadecimalValue,
             artifacts: artifacts,
             evidenceIDs: [report.artifactID],
             generatedAt: generatedAt,
@@ -166,7 +170,7 @@ private struct TapeoutFixture {
                 artifact: bundleArtifact,
                 designDigest: designDigest,
                 pdkDigest: pdkDigest,
-                finalLayoutDigest: layout.sha256
+                finalLayoutDigest: layout.digest.hexadecimalValue
             ),
             physicalDesign: physical,
             pdk: pdk,

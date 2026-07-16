@@ -241,8 +241,8 @@ private struct SignoffFixture {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         designArtifact = try Self.write("design", path: "inputs/design.json", kind: .input, role: .input, root: root)
         pdkArtifact = try Self.write("pdk", path: "inputs/pdk.json", kind: .technology, role: .input, root: root)
-        let localDesignDigest = designArtifact.sha256
-        let localPDKDigest = pdkArtifact.sha256
+        let localDesignDigest = designArtifact.digest.hexadecimalValue
+        let localPDKDigest = pdkArtifact.digest.hexadecimalValue
         designDigest = localDesignDigest
         pdkDigest = localPDKDigest
 
@@ -257,17 +257,17 @@ private struct SignoffFixture {
         let scope = ToolQualificationScope(
             implementationID: "signoff-tool",
             toolVersion: "1.0.0",
-            binaryDigest: tool.sha256,
+            binaryDigest: tool.digest.hexadecimalValue,
             algorithmVersion: "signoff-v1",
             processProfileID: "process",
-            processProfileDigest: process.sha256,
-            deckDigest: deck.sha256,
+            processProfileDigest: process.digest.hexadecimalValue,
+            deckDigest: deck.digest.hexadecimalValue,
             pdkID: "pdk",
-            pdkDigest: pdk.sha256,
+            pdkDigest: pdk.digest.hexadecimalValue,
             oracle: ToolOracleQualificationScope(
                 implementationID: "signoff-oracle",
                 version: "2.0.0",
-                binaryDigest: oracle.sha256
+                binaryDigest: oracle.digest.hexadecimalValue
             )
         )
         var reports: [ArtifactReference] = []
@@ -384,7 +384,7 @@ private struct SignoffFixture {
                 pdkDigest: localPDKDigest,
                 toolID: "signoff-tool",
                 toolVersion: "1.0.0",
-                toolBinaryDigest: tool.sha256,
+                toolBinaryDigest: tool.digest.hexadecimalValue,
                 inputArtifacts: [designArtifact, pdkArtifact],
                 processQualification: qualification,
                 disposition: axis == failedAxis ? .failed : .passed,
