@@ -29,9 +29,14 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
         let startedAt = now()
         let profile = profileProvider.profile(profileID: request.profileID)
         let metadata = try ExecutionProvenance(
-            engineID: "release.signoff",
-            implementationID: "native.release.signoff",
-            implementationVersion: "1.0.0",
+            producer: ProducerIdentity(
+                kind: .engine,
+                identifier: "native.release.signoff",
+                version: "1.0.0"
+            ),
+            invocation: ExecutionInvocation.inProcess(
+                entryPoint: "SignoffEngine.DefaultSignoffEvaluator.execute"
+            ),
             startedAt: startedAt,
             completedAt: now()
         )
@@ -250,7 +255,8 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             guard let bundleArtifact = request.bundleArtifact,
                   bundleArtifact.kind == .release,
                   !bundleArtifact.path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  isSHA256(bundleArtifact.sha256) else {
+                  bundleArtifact.digest.algorithm == .sha256,
+                  isSHA256(bundleArtifact.digest.hexadecimalValue) else {
                 diagnostics.append(diagnostic(
                     "SIGNOFF_BUNDLE_ARTIFACT_REQUIRED",
                     "A passing signoff result must provide an immutable release artifact reference with digest and byte count.",
@@ -426,7 +432,8 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             guard decoded == expected,
                   data == canonical,
                   artifact.digest.algorithm == .sha256,
-                  artifact.sha256.caseInsensitiveCompare(digest) == .orderedSame,
+                  artifact.digest.algorithm == .sha256,
+                  artifact.digest.hexadecimalValue.caseInsensitiveCompare(digest) == .orderedSame,
                   artifact.byteCount == UInt64(canonical.count) else {
                 return (false, "Stored bundle content, digest, or byte count does not match the computed signoff decision.")
             }

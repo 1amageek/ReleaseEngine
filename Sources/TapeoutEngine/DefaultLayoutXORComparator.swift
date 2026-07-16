@@ -18,8 +18,8 @@ public struct DefaultLayoutXORComparator: LayoutXORComparing {
             return LayoutXORResult(
                 status: .blocked,
                 method: .byteIdentity,
-                sourceDigest: source.sha256,
-                streamedDigest: streamed.sha256,
+                sourceDigest: source.digest.hexadecimalValue,
+                streamedDigest: streamed.digest.hexadecimalValue,
                 message: "A project root is required for exact-stream comparison."
             )
         }
@@ -29,13 +29,13 @@ public struct DefaultLayoutXORComparator: LayoutXORComparing {
             return LayoutXORResult(
                 status: .blocked,
                 method: .byteIdentity,
-                sourceDigest: source.sha256,
-                streamedDigest: streamed.sha256,
+                sourceDigest: source.digest.hexadecimalValue,
+                streamedDigest: streamed.digest.hexadecimalValue,
                 message: "Exact-stream comparison is blocked until both layout artifacts pass integrity verification."
             )
         }
-        let sourceDigest = source.sha256
-        let streamedDigest = streamed.sha256
+        let sourceDigest = source.digest.hexadecimalValue
+        let streamedDigest = streamed.digest.hexadecimalValue
         if sourceDigest == streamedDigest {
             return LayoutXORResult(
                 status: .passed,

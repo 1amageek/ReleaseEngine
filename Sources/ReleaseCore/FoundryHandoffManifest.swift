@@ -46,7 +46,15 @@ public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
     public func computedManifestDigest() -> String {
         let artifactMaterial = artifacts
             .sorted { $0.path < $1.path }
-            .map { [$0.path, $0.format.rawValue, $0.sha256, String($0.byteCount)].joined(separator: "|") }
+            .map {
+                [
+                    $0.path,
+                    $0.format.rawValue,
+                    $0.digest.algorithm.rawValue,
+                    $0.digest.hexadecimalValue,
+                    String($0.byteCount),
+                ].joined(separator: "|")
+            }
             .joined(separator: "\n")
         let material = [
             String(schemaVersion),

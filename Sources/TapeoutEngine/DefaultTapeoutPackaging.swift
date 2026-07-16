@@ -27,9 +27,14 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
     ) async throws -> TapeoutResult {
         let startedAt = now()
         let metadata = try ExecutionProvenance(
-            engineID: "release.tapeout",
-            implementationID: "native.release.tapeout",
-            implementationVersion: "1.0.0",
+            producer: ProducerIdentity(
+                kind: .engine,
+                identifier: "native.release.tapeout",
+                version: "1.0.0"
+            ),
+            invocation: ExecutionInvocation.inProcess(
+                entryPoint: "TapeoutEngine.DefaultTapeoutPackaging.execute"
+            ),
             startedAt: startedAt,
             completedAt: now()
         )
@@ -206,7 +211,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
             let unsigned = FoundryHandoffManifest(
                 releaseID: "\(request.runID)-tapeout",
                 foundryID: request.foundryID,
-                signoffBundleArtifactDigest: bundle.artifact.sha256,
+                signoffBundleArtifactDigest: bundle.artifact.digest.hexadecimalValue,
                 designDigest: bundle.designDigest,
                 pdkDigest: request.pdk.digest,
                 layoutDigest: request.physicalDesign.layoutDigest,

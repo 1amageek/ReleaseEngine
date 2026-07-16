@@ -19,9 +19,14 @@ public struct DefaultReleaseAuthorizer: ReleaseAuthorizing {
     public func execute(_ request: ReleaseAuthorizationRequest) async throws -> ReleaseAuthorizationResult {
         var diagnostics: [DesignDiagnostic] = []
         let provenance = try ExecutionProvenance(
-            engineID: "release.authorization",
-            implementationID: "native.release.authorization",
-            implementationVersion: "1.0.0",
+            producer: ProducerIdentity(
+                kind: .engine,
+                identifier: "native.release.authorization",
+                version: "1.0.0"
+            ),
+            invocation: ExecutionInvocation.inProcess(
+                entryPoint: "ReleaseEngine.DefaultReleaseAuthorizer.execute"
+            ),
             startedAt: request.evaluatedAt,
             completedAt: request.evaluatedAt
         )

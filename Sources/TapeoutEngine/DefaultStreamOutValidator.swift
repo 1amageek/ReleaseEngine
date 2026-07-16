@@ -84,7 +84,8 @@ public struct DefaultStreamOutValidator: StreamOutValidating {
         if manifest.generatedBy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             fail("STREAM_OUT_PRODUCER_REQUIRED", "Stream-out manifest must identify the generator.", entity: manifest.topCell, blocked: true)
         }
-        if source.layoutDigest != source.layoutArtifact.sha256 {
+        if source.layoutArtifact.digest.algorithm != .sha256
+            || source.layoutDigest != source.layoutArtifact.digest.hexadecimalValue {
             fail("SOURCE_LAYOUT_DIGEST_MISMATCH", "Physical design layout digest does not match its artifact reference.", entity: source.layoutArtifact.path, blocked: false)
         }
 

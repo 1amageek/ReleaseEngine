@@ -151,8 +151,18 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
                 )
             }
             if record.inputArtifacts.isEmpty
-                || !record.inputArtifacts.contains(where: { $0.sha256.caseInsensitiveCompare(record.designDigest) == .orderedSame })
-                || !record.inputArtifacts.contains(where: { $0.sha256.caseInsensitiveCompare(record.pdkDigest) == .orderedSame }) {
+                || !record.inputArtifacts.contains(where: {
+                    $0.digest.algorithm == .sha256
+                        && $0.digest.hexadecimalValue.caseInsensitiveCompare(
+                            record.designDigest
+                        ) == .orderedSame
+                })
+                || !record.inputArtifacts.contains(where: {
+                    $0.digest.algorithm == .sha256
+                        && $0.digest.hexadecimalValue.caseInsensitiveCompare(
+                            record.pdkDigest
+                        ) == .orderedSame
+                }) {
                 recordBlocked = true
                 add(
                     "SIGNOFF_INPUT_BINDING_INCOMPLETE",
