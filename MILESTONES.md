@@ -44,7 +44,7 @@ Exit evidence:
 - Positive retained corpus fixture produces `completed` + `qualified=true`.
 - Missing oracle lane, stale report, tampered artifact, missing process scope and weak metrics produce structured fail-closed results.
 - JSON round-trip and seven retained-qualification regression tests pass.
-- `release-engine qualify --request <path|->` and the Xcircuite `release.qualification` adapter are implemented; the adapter persists the result envelope under the run stage.
+- `release-engine qualify --request <path|->` and Xcircuite release qualification composition are implemented; Xcircuite invokes the typed ReleaseEngine protocol directly and persists the domain result under the run stage.
 
 M2 boundary:
 
@@ -124,10 +124,10 @@ Status: complete for the qualification-stage and release-profile approval/resume
 
 Current evidence:
 
-- Release signoff and tapeout stage adapters load project-relative requests, persist raw envelopes and map typed status/gates.
-- The qualification stage adapter loads a project-relative qualification request, injects the flow project root, persists the raw envelope, and maps `payload.qualified` to the release gate.
-- The qualification adapter participates in the shared run ledger approval gate; an approved `release.qualification` stage resumes with the same run ID and registered result artifact.
-- A release profile integration fixture executes signoff → qualification → tapeout → profile under one run ID, records approval for each gated stage, resumes three times, and persists all stage result envelopes in the same run manifest.
+- Release signoff and tapeout stage executors load project-relative requests, persist typed results and map typed status/gates.
+- The qualification stage executor loads a project-relative qualification request, injects the flow project root, persists the typed result, and maps `payload.qualified` to the release gate.
+- The qualification stage participates in the shared run ledger approval gate; an approved `release.qualification` stage resumes with the same run ID and registered result artifact.
+- A release profile integration fixture executes signoff → qualification → tapeout → profile under one run ID, records approval for each gated stage, resumes three times, and persists all typed stage results in the same run manifest.
 - DesignFlowKernel preserves the immutable reviewed stage result used by an approval, so later resumes do not invalidate earlier approvals when the applied gate changes the current result hash.
 
 Remaining hardening evidence:
@@ -147,7 +147,7 @@ Exit evidence:
 Current implementation evidence:
 
 - `release-engine eligibility --request <path|->` evaluates the complete stage evidence contract and emits deterministic eligible/blocked payloads.
-- Xcircuite exposes `release.profile` as an agent-facing runtime stage and persists its raw result envelope.
+- Xcircuite exposes `release.profile` as an agent-facing runtime stage and persists its typed ReleaseEngine result.
 - Corpus-only qualification, non-human approval, digest mismatch and missing packet binding remain blocked by regression tests.
 
 Current blockers are tracked in `GOAL_STATUS.md` and `QUALIFICATION.md`. A source type, local smoke test or successful build never closes a qualification milestone by itself.

@@ -13,7 +13,7 @@ public struct ReleaseSignoffAxisRequirement: Sendable, Hashable, Codable {
         axis: ReleaseSignoffAxis,
         required: Bool,
         minimumEvidenceCount: Int = 1,
-        minimumQualificationLevel: ToolQualificationLevel = .smokeChecked,
+        minimumQualificationLevel: ToolQualificationLevel = .productionEligible,
         requiredArtifactKinds: [ArtifactKind] = [.report]
     ) {
         self.axis = axis

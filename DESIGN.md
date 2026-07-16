@@ -1,39 +1,28 @@
 # ReleaseEngine Design
 
-## Purpose
+## Responsibility
 
-Fail-closed multi-axis signoff and immutable tapeout release contracts.
+ReleaseEngine turns immutable domain evidence into three distinct outputs: a signoff bundle, a tapeout handoff manifest, and a final authorization decision. It does not execute DRC/LVS/PEX/STA analyses and does not decide whether a tool is qualified.
 
-## Responsibility boundary
+## Trust ownership
 
-This package owns the schemas and engine protocols listed in its public products. It must remain usable without UI state and without the Xcircuite runtime.
+| State | Owner |
+|---|---|
+| Domain findings and metrics | Producing engine |
+| Tool trust | ToolQualification |
+| Human approval and review binding | DesignFlowKernel |
+| Canonical `.xcircuite` persistence | Xcircuite |
+| Final release authorization | ReleaseEngine |
 
-## Non-responsibilities
+`DefaultReleaseAuthorizer` recomputes every supplied ToolQualification decision through a digest-verifying artifact reader. A status value without its descriptor, requirement, health input, and retained raw results is insufficient. Human approval is accepted only when it is an approved human `FlowApprovalRecord` bound to the exact signoff bundle artifact.
 
-- Executing domain analyses
-- Repairing design data
-- Converting blocked evidence into a pass
+## Artifact invariants
 
-## Dependency direction
+- Signoff and handoff JSON must be canonical byte-for-byte.
+- `ArtifactReference` digest and byte count are verified before decoding.
+- Production signoff contains exactly one result for every `ReleaseSignoffAxis`.
+- Missing, duplicate, failed, or blocked axes reject authorization.
+- Bundle and handoff schemas contain no self-approval flag or approval digest.
+- Tapeout accepts byte identity or retained production-qualified geometric XOR evidence.
 
-```text
-standard artifacts / canonical references
-                 ↓
-ReleaseEngine protocols and result schemas
-                 ↓
-native or external-tool backends
-                 ↓
-Xcircuite stage adapters
-                 ↓
-DesignFlowKernel and .xcircuite artifacts
-```
-
-Backends may depend on lower-level data packages. This package must never import `Xcircuite` or `circuit-studio`.
-
-## Trust model
-
-Kernel availability, corpus validation, oracle correlation, process-scoped qualification and release approval are distinct states. The package reports capability and evidence; Xcircuite and ToolQualification apply flow policy.
-
-## Artifact requirements
-
-All outputs are immutable run artifacts with format, digest, producer metadata and the input design/PDK revision needed to reproduce the result.
+The canonical release-profile API is the only public release-profile surface.

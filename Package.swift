@@ -8,7 +8,6 @@ let package = Package(
         .library(name: "ReleaseCore", targets: ["ReleaseCore"]),
         .library(name: "SignoffEngine", targets: ["SignoffEngine"]),
         .library(name: "TapeoutEngine", targets: ["TapeoutEngine"]),
-        .library(name: "QualificationEngine", targets: ["QualificationEngine"]),
         .library(name: "ReleaseEngine", targets: ["ReleaseEngine"]),
         .executable(name: "release-engine", targets: ["ReleaseEngineCLI"]),
     ],
@@ -16,6 +15,7 @@ let package = Package(
         .package(path: "../CircuiteFoundation"),
         .package(path: "../PDKKit"),
         .package(path: "../ToolQualification"),
+        .package(path: "../DesignFlowKernel"),
         .package(path: "../PhysicalDesignEngine"),
         .package(path: "../LogicDesign"),
     ],
@@ -33,27 +33,26 @@ let package = Package(
             dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), "ReleaseCore", "SignoffEngine"]
         ),
         .target(
-            name: "QualificationEngine",
-            dependencies: [
-                .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
-                .product(name: "LogicIR", package: "LogicDesign"),
-                .product(name: "ToolQualification", package: "ToolQualification"),
-                "ReleaseCore",
-            ]
-        ),
-        .target(
             name: "ReleaseEngine",
             dependencies: [
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
+                .product(name: "DesignFlowKernel", package: "DesignFlowKernel"),
+                .product(name: "ToolQualification", package: "ToolQualification"),
                 "ReleaseCore",
                 "SignoffEngine",
                 "TapeoutEngine",
-                "QualificationEngine",
             ]
         ),
         .executableTarget(
             name: "ReleaseEngineCLI",
-            dependencies: ["ReleaseCore", "SignoffEngine", "TapeoutEngine", "QualificationEngine", "ReleaseEngine"]
+            dependencies: [
+                "ReleaseCore",
+                "SignoffEngine",
+                "TapeoutEngine",
+                "ReleaseEngine",
+                .product(name: "ToolQualification", package: "ToolQualification"),
+                .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
+            ]
         ),
         .testTarget(
             name: "ReleaseEngineTests",
@@ -61,12 +60,12 @@ let package = Package(
                 "ReleaseCore",
                 "SignoffEngine",
                 "TapeoutEngine",
-                "QualificationEngine",
                 "ReleaseEngine",
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
                 .product(name: "PDKCore", package: "PDKKit"),
                 .product(name: "PhysicalDesignCore", package: "PhysicalDesignEngine"),
                 .product(name: "ToolQualification", package: "ToolQualification"),
+                .product(name: "DesignFlowKernel", package: "DesignFlowKernel"),
             ]
         ),
     ]

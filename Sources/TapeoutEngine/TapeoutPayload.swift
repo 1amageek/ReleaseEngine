@@ -5,13 +5,12 @@ import PhysicalDesignCore
 import PDKCore
 
 public struct TapeoutPayload: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int
     public var releaseArtifact: ArtifactReference?
     public var checksum: String?
-    public var approved: Bool
-    public var signoffBundleDigest: String?
+    public var completed: Bool
     public var layoutDigest: String?
     public var pdkDigest: String?
     public var streamOut: StreamOutManifest?
@@ -21,8 +20,7 @@ public struct TapeoutPayload: Sendable, Hashable, Codable {
     public init(
         releaseArtifact: ArtifactReference?,
         checksum: String?,
-        approved: Bool = false,
-        signoffBundleDigest: String? = nil,
+        completed: Bool = false,
         layoutDigest: String? = nil,
         pdkDigest: String? = nil,
         streamOut: StreamOutManifest? = nil,
@@ -33,8 +31,7 @@ public struct TapeoutPayload: Sendable, Hashable, Codable {
         self.schemaVersion = schemaVersion
         self.releaseArtifact = releaseArtifact
         self.checksum = checksum
-        self.approved = approved
-        self.signoffBundleDigest = signoffBundleDigest
+        self.completed = completed
         self.layoutDigest = layoutDigest
         self.pdkDigest = pdkDigest
         self.streamOut = streamOut

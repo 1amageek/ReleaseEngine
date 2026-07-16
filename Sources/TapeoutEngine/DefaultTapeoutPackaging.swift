@@ -71,11 +71,8 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
         if bundle.artifact.kind != .release {
             add("SIGNOFF_BUNDLE_KIND_INVALID", "Tapeout accepts only a release-kind signoff bundle artifact.", entity: bundle.artifact.path, blocked: true)
         }
-        if !bundle.approved {
-            add("SIGNOFF_BUNDLE_NOT_APPROVED", "Tapeout accepts only a signoff bundle explicitly marked approved.", entity: bundle.artifact.path, blocked: true)
-        }
-        if !isSHA256(bundle.designDigest) || !isSHA256(bundle.pdkDigest) || !(bundle.bundleDigest.map(isSHA256) ?? false) {
-            add("SIGNOFF_BUNDLE_DIGEST_REQUIRED", "Signoff bundle design, PDK, and bundle digests must be SHA-256 values.", entity: bundle.artifact.path, blocked: true)
+        if !isSHA256(bundle.designDigest) || !isSHA256(bundle.pdkDigest) {
+            add("SIGNOFF_BUNDLE_DIGEST_REQUIRED", "Signoff bundle design and PDK digests must be SHA-256 values.", entity: bundle.artifact.path, blocked: true)
         }
         if bundle.pdkDigest != request.pdk.digest {
             add("SIGNOFF_PDK_BINDING_MISMATCH", "Signoff bundle is bound to a different PDK revision.", entity: bundle.artifact.path, blocked: false)
@@ -116,23 +113,33 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
         if xorResult?.status == .blocked {
             add("LAYOUT_XOR_BLOCKED", xorResult?.message ?? "Layout XOR comparison is blocked.", entity: request.runID, blocked: true)
         } else if xorResult?.status == .failed {
-            if streamOut.requirements.requireExactStreamIdentity {
-                add("LAYOUT_XOR_FAILED", xorResult?.message ?? "Layout XOR comparison failed.", entity: request.runID, blocked: false)
-            } else {
-                diagnostics.append(DesignDiagnostic(
-                    severity: .warning,
-                    code: "LAYOUT_XOR_GEOMETRY_NOT_QUALIFIED",
-                    message: "Exact byte identity was not required, and no qualified geometric XOR comparator is installed.",
-                    entity: request.runID,
-                    suggestedActions: ["install_qualified_geometry_xor_comparator"]
-                ))
-            }
+            add("LAYOUT_XOR_FAILED", xorResult?.message ?? "Layout comparison failed.", entity: request.runID, blocked: false)
+        } else if xorResult?.isTapeoutQualified(at: startedAt) != true {
+            add(
+                "LAYOUT_XOR_QUALIFICATION_REQUIRED",
+                "Tapeout requires byte-identical layout streams or immutable evidence from a production-qualified geometric XOR implementation.",
+                entity: request.runID,
+                blocked: true
+            )
         }
 
         if let projectURL {
             let bundleIntegrity = verifier.verify(bundle.artifact, relativeTo: projectURL)
             if !bundleIntegrity.isVerified {
                 add("SIGNOFF_BUNDLE_INTEGRITY_FAILED", bundleIntegrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "), entity: bundle.artifact.path, blocked: true)
+            } else {
+                do {
+                    let bundleURL = try bundle.artifact.locator.location.resolvedFileURL(relativeTo: projectURL)
+                    let persistedBundle = try SignoffBundle.decodeCanonical(from: Data(contentsOf: bundleURL))
+                    guard persistedBundle.designDigest == bundle.designDigest,
+                          persistedBundle.pdkDigest == bundle.pdkDigest,
+                          persistedBundle.finalLayoutDigest == bundle.finalLayoutDigest else {
+                        add("SIGNOFF_BUNDLE_CONTENT_MISMATCH", "The persisted signoff bundle does not match its artifact reference and release bindings.", entity: bundle.artifact.path, blocked: true)
+                        return envelope(request: request, status: status, diagnostics: diagnostics, metadata: metadata, payload: TapeoutPayload(releaseArtifact: nil, checksum: nil))
+                    }
+                } catch {
+                    add("SIGNOFF_BUNDLE_DECODE_FAILED", "The persisted signoff bundle is not canonical: \(error.localizedDescription)", entity: bundle.artifact.path, blocked: true)
+                }
             }
             let pdkIntegrity = verifier.verify(request.pdk.manifest, relativeTo: projectURL)
             if !pdkIntegrity.isVerified {
@@ -142,6 +149,29 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
                 let integrity = verifier.verify(evidence, relativeTo: projectURL)
                 if !integrity.isVerified {
                     add("HANDOFF_EVIDENCE_INTEGRITY_FAILED", integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "), entity: evidence.path, blocked: true)
+                }
+            }
+            if let xorEvidence = xorResult?.evidenceArtifact {
+                let integrity = verifier.verify(xorEvidence, relativeTo: projectURL)
+                if !integrity.isVerified {
+                    add("LAYOUT_XOR_EVIDENCE_INTEGRITY_FAILED", integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "), entity: xorEvidence.path, blocked: true)
+                }
+            }
+            if let qualification = xorResult?.processQualification {
+                let qualificationArtifacts = qualification.identityArtifacts.all
+                    + qualification.evidenceArtifacts
+                    + qualification.inputArtifacts
+                    + qualification.outputArtifacts
+                for artifact in Set(qualificationArtifacts) {
+                    let integrity = verifier.verify(artifact, relativeTo: projectURL)
+                    if !integrity.isVerified {
+                        add(
+                            "LAYOUT_XOR_QUALIFICATION_INTEGRITY_FAILED",
+                            integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "),
+                            entity: artifact.path,
+                            blocked: true
+                        )
+                    }
                 }
             }
         } else {
@@ -156,8 +186,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
             return envelope(request: request, status: status, diagnostics: diagnostics, metadata: metadata, payload: TapeoutPayload(
                 releaseArtifact: nil,
                 checksum: nil,
-                approved: false,
-                signoffBundleDigest: bundle.bundleDigest,
+                completed: false,
                 layoutDigest: request.physicalDesign.layoutDigest,
                 pdkDigest: request.pdk.digest,
                 streamOut: streamOutManifest,
@@ -170,13 +199,14 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
             let evidenceIDs = request.evidence.map(\.artifactID)
             let artifacts = uniqueArtifacts([
                 bundle.artifact,
+                request.pdk.manifest,
                 request.physicalDesign.layoutArtifact,
                 streamOut.manifest.streamedArtifact,
-            ] + request.evidence + [releaseArtifact])
+            ] + request.evidence + [xorResult?.evidenceArtifact].compactMap { $0 })
             let unsigned = FoundryHandoffManifest(
                 releaseID: "\(request.runID)-tapeout",
                 foundryID: request.foundryID,
-                signoffBundleDigest: bundle.bundleDigest ?? "",
+                signoffBundleArtifactDigest: bundle.artifact.sha256,
                 designDigest: bundle.designDigest,
                 pdkDigest: request.pdk.digest,
                 layoutDigest: request.physicalDesign.layoutDigest,
@@ -188,7 +218,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
             handoff = FoundryHandoffManifest(
                 releaseID: unsigned.releaseID,
                 foundryID: unsigned.foundryID,
-                signoffBundleDigest: unsigned.signoffBundleDigest,
+                signoffBundleArtifactDigest: unsigned.signoffBundleArtifactDigest,
                 designDigest: unsigned.designDigest,
                 pdkDigest: unsigned.pdkDigest,
                 layoutDigest: unsigned.layoutDigest,
@@ -197,13 +227,52 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
                 generatedAt: unsigned.generatedAt,
                 manifestDigest: unsigned.computedManifestDigest()
             )
+            if let expectedHandoff = handoff, let projectURL {
+                let integrity = verifier.verify(releaseArtifact, relativeTo: projectURL)
+                if !integrity.isVerified {
+                    add(
+                        "TAPEOUT_RELEASE_ARTIFACT_INTEGRITY_FAILED",
+                        integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "),
+                        entity: releaseArtifact.path,
+                        blocked: true
+                    )
+                    handoff = nil
+                } else {
+                    do {
+                        let url = try releaseArtifact.locator.location.resolvedFileURL(relativeTo: projectURL)
+                        let data = try Data(contentsOf: url)
+                        let decoded = try FoundryHandoffManifest.decodeCanonical(from: data)
+                        let expected = try expectedHandoff.canonicalData()
+                        guard decoded == expectedHandoff,
+                              decoded.isSelfConsistent,
+                              data == expected,
+                              releaseArtifact.byteCount == UInt64(expected.count) else {
+                            add(
+                                "TAPEOUT_RELEASE_ARTIFACT_CONTENT_MISMATCH",
+                                "Release artifact bytes do not equal the canonical foundry handoff manifest.",
+                                entity: releaseArtifact.path,
+                                blocked: true
+                            )
+                            handoff = nil
+                            return envelope(request: request, status: status, diagnostics: diagnostics, metadata: metadata, payload: TapeoutPayload(releaseArtifact: nil, checksum: nil))
+                        }
+                    } catch {
+                        add(
+                            "TAPEOUT_RELEASE_ARTIFACT_DECODE_FAILED",
+                            error.localizedDescription,
+                            entity: releaseArtifact.path,
+                            blocked: true
+                        )
+                        handoff = nil
+                    }
+                }
+            }
         }
 
         let payload = TapeoutPayload(
             releaseArtifact: status == .completed ? releaseArtifact : nil,
             checksum: handoff?.manifestDigest,
-            approved: status == .completed,
-            signoffBundleDigest: bundle.bundleDigest,
+            completed: status == .completed,
             layoutDigest: request.physicalDesign.layoutDigest,
             pdkDigest: request.pdk.digest,
             streamOut: streamOutManifest,
@@ -219,7 +288,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
                 request.pdk.manifest,
                 request.physicalDesign.layoutArtifact,
                 streamOut.manifest.streamedArtifact,
-            ] + request.evidence + [releaseArtifact]),
+            ] + request.evidence + [xorResult?.evidenceArtifact, releaseArtifact].compactMap { $0 }),
             metadata: metadata,
             payload: payload
         )

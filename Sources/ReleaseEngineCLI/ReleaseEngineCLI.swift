@@ -1,9 +1,9 @@
 import Foundation
-import QualificationEngine
 import ReleaseCore
 import ReleaseEngine
 import SignoffEngine
 import TapeoutEngine
+import ToolQualification
 import CircuiteFoundation
 
 @main
@@ -37,14 +37,10 @@ struct ReleaseEngineCLI {
             let envelope = try await executeTapeout(arguments: Array(arguments.dropFirst()))
             try writeJSON(envelope)
             return exitCode(for: envelope.status)
-        case "qualify":
-            let envelope = try await executeQualification(arguments: Array(arguments.dropFirst()))
+        case "authorize":
+            let envelope = try await executeAuthorization(arguments: Array(arguments.dropFirst()))
             try writeJSON(envelope)
-            return exitCode(for: envelope.status)
-        case "eligibility":
-            let envelope = try await executeEligibility(arguments: Array(arguments.dropFirst()))
-            try writeJSON(envelope)
-            return exitCode(for: envelope.status)
+            return envelope.status == .authorized ? 0 : 2
         case "help", "--help", "-h":
             printHelp()
             return 0
@@ -74,16 +70,26 @@ struct ReleaseEngineCLI {
         return try await DefaultTapeoutPackaging().execute(request)
     }
 
-    private static func executeQualification(arguments: [String]) async throws -> ReleaseQualificationResult {
+    private static func executeAuthorization(arguments: [String]) async throws -> ReleaseAuthorizationResult {
         let data = try inputData(arguments: arguments)
-        let request = try decoder.decode(ReleaseQualificationRequest.self, from: data)
-        return try await DefaultRetainedQualificationEvaluator().execute(request)
-    }
-
-    private static func executeEligibility(arguments: [String]) async throws -> ReleaseProfileEligibilityResult {
-        let data = try inputData(arguments: arguments)
-        let request = try decoder.decode(ReleaseProfileEligibilityRequest.self, from: data)
-        return try await DefaultReleaseProfileEligibilityEvaluator().execute(request)
+        let request = try decoder.decode(ReleaseAuthorizationRequest.self, from: data)
+        guard let rootPath = argumentValue("--project-root", in: arguments) else {
+            throw CLIError.invalidArgument("authorize requires --project-root")
+        }
+        let root = URL(fileURLWithPath: rootPath, isDirectory: true)
+        let qualificationReader = LocalToolQualificationArtifactReader(workspaceRoot: root)
+        let qualificationEngine = DefaultToolQualificationEngine(
+            artifactReader: qualificationReader,
+            producer: try ProducerIdentity(
+                kind: .library,
+                identifier: "ToolQualification",
+                version: "1.0.0"
+            )
+        )
+        return try await DefaultReleaseAuthorizer(
+            qualificationEngine: qualificationEngine,
+            artifactReader: LocalReleaseArtifactReader(workspaceRoot: root)
+        ).execute(request)
     }
 
     private static func inputData(arguments: [String]) throws -> Data {
@@ -140,8 +146,7 @@ struct ReleaseEngineCLI {
         release-engine profile [--profile <digital|analog|mixed-signal>]
         release-engine signoff --request <path|->
         release-engine tapeout --request <path|->
-        release-engine qualify --request <path|->
-        release-engine eligibility --request <path|->
+          release-engine authorize --request <path|-> --project-root <path>
 
         The signoff, tapeout, qualify, and eligibility commands emit JSON envelopes.
         Exit codes: 0 completed, 2 blocked, 3 failed, 4 cancelled.

@@ -7,6 +7,7 @@ public protocol SignoffEvidenceValidating: Sendable {
         projectRoot: URL?,
         designDigest: String,
         pdkDigest: String,
-        profile: ReleaseSignoffProfile
+        profile: ReleaseSignoffProfile,
+        evaluatedAt: Date
     ) -> SignoffEvidenceValidationResult
 }

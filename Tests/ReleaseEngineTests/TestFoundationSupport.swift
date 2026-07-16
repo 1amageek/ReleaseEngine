@@ -9,7 +9,8 @@ func makeTestArtifactReference(
     format: ArtifactFormat,
     role: ArtifactRole = .input,
     sha256: String? = nil,
-    byteCount: Int64? = nil
+    byteCount: Int64? = nil,
+    producer: ProducerIdentity? = nil
 ) -> ArtifactReference {
     do {
         let location = try ArtifactLocation(workspaceRelativePath: path)
@@ -32,7 +33,8 @@ func makeTestArtifactReference(
                 format: format
             ),
             digest: digest,
-            byteCount: UInt64(max(0, byteCount ?? 0))
+            byteCount: UInt64(max(0, byteCount ?? 0)),
+            producer: producer
         )
     } catch {
         preconditionFailure("Invalid release test artifact fixture: \(error)")

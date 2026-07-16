@@ -17,7 +17,7 @@ public struct DefaultLayoutXORComparator: LayoutXORComparing {
         guard let projectRoot else {
             return LayoutXORResult(
                 status: .blocked,
-                method: "bytewise-exact-stream",
+                method: .byteIdentity,
                 sourceDigest: source.sha256,
                 streamedDigest: streamed.sha256,
                 message: "A project root is required for exact-stream comparison."
@@ -28,7 +28,7 @@ public struct DefaultLayoutXORComparator: LayoutXORComparing {
         guard sourceIntegrity.isVerified, streamedIntegrity.isVerified else {
             return LayoutXORResult(
                 status: .blocked,
-                method: "bytewise-exact-stream",
+                method: .byteIdentity,
                 sourceDigest: source.sha256,
                 streamedDigest: streamed.sha256,
                 message: "Exact-stream comparison is blocked until both layout artifacts pass integrity verification."
@@ -39,7 +39,7 @@ public struct DefaultLayoutXORComparator: LayoutXORComparing {
         if sourceDigest == streamedDigest {
             return LayoutXORResult(
                 status: .passed,
-                method: "bytewise-exact-stream",
+                method: .byteIdentity,
                 sourceDigest: sourceDigest,
                 streamedDigest: streamedDigest,
                 message: "Source and streamed layout bytes are identical."
@@ -47,7 +47,7 @@ public struct DefaultLayoutXORComparator: LayoutXORComparing {
         }
         return LayoutXORResult(
             status: .failed,
-            method: "bytewise-exact-stream",
+            method: .byteIdentity,
             sourceDigest: sourceDigest,
             streamedDigest: streamedDigest,
             message: "Source and streamed layout bytes differ. Geometric XOR equivalence requires a qualified geometry comparator."

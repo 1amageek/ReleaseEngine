@@ -43,4 +43,4 @@ Permit tapeout only when an immutable design has complete, applicable and suffic
 - Contract and parser round-trip tests
 - Reference corpus
 - Capability and limitation report
-- Xcircuite stage adapter tests
+- Xcircuite stage composition tests using direct protocol conformance

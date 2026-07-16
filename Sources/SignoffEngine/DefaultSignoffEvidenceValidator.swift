@@ -15,7 +15,8 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
         projectRoot: URL?,
         designDigest: String,
         pdkDigest: String,
-        profile: ReleaseSignoffProfile
+        profile: ReleaseSignoffProfile,
+        evaluatedAt: Date
     ) -> SignoffEvidenceValidationResult {
         var verifiedIDs: [String] = []
         var blockedIDs: [String] = []
@@ -116,19 +117,46 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
                 recordBlocked = true
                 add("PDK_DIGEST_MISMATCH", "Evidence was produced from a different PDK revision.", axis: axis, entity: record.evidenceID)
             }
-            if !isSHA256(record.designDigest) || !isSHA256(record.pdkDigest) || !isSHA256(record.toolDigest) {
+            if !isSHA256(record.designDigest) || !isSHA256(record.pdkDigest) || !isSHA256(record.toolBinaryDigest) {
                 recordBlocked = true
                 add("INVALID_PROVENANCE_DIGEST", "Design, PDK and tool provenance digests must be SHA-256 values.", axis: axis, entity: record.evidenceID)
             }
-            if record.toolID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if record.toolID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || record.toolVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 recordBlocked = true
-                add("TOOL_ID_REQUIRED", "Evidence must identify the producing tool.", axis: axis, entity: record.evidenceID)
+                add("TOOL_IDENTITY_REQUIRED", "Evidence must identify the producing tool and exact version.", axis: axis, entity: record.evidenceID)
             }
-            if record.qualificationLevel < requirement.minimumQualificationLevel {
+            let qualification = record.processQualification
+            if requirement.minimumQualificationLevel == .productionEligible,
+               !qualification.isQualified(at: evaluatedAt, requirePDKScope: true) {
                 recordBlocked = true
                 add(
-                    "INSUFFICIENT_TOOL_QUALIFICATION",
-                    "Evidence qualification level is below the profile threshold.",
+                    "PROCESS_QUALIFICATION_INVALID",
+                    "Evidence requires a fresh, independently qualified, artifact-backed production record.",
+                    axis: axis,
+                    entity: record.evidenceID
+                )
+            }
+            if qualification.toolID != record.toolID
+                || qualification.scope.implementationID != record.toolID
+                || qualification.scope.toolVersion != record.toolVersion
+                || qualification.scope.binaryDigest.caseInsensitiveCompare(record.toolBinaryDigest) != .orderedSame
+                || qualification.scope.pdkDigest?.caseInsensitiveCompare(record.pdkDigest) != .orderedSame {
+                recordBlocked = true
+                add(
+                    "PROCESS_QUALIFICATION_SCOPE_MISMATCH",
+                    "Qualification must bind the exact tool binary/version, process, PDK, deck, and independent oracle scope.",
+                    axis: axis,
+                    entity: record.evidenceID
+                )
+            }
+            if record.inputArtifacts.isEmpty
+                || !record.inputArtifacts.contains(where: { $0.sha256.caseInsensitiveCompare(record.designDigest) == .orderedSame })
+                || !record.inputArtifacts.contains(where: { $0.sha256.caseInsensitiveCompare(record.pdkDigest) == .orderedSame }) {
+                recordBlocked = true
+                add(
+                    "SIGNOFF_INPUT_BINDING_INCOMPLETE",
+                    "Evidence must retain immutable design and PDK input artifacts.",
                     axis: axis,
                     entity: record.evidenceID
                 )
@@ -152,6 +180,43 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
                         entity: record.evidenceID
                     )
                 }
+            }
+            for inputArtifact in record.inputArtifacts {
+                let integrity = verifier.verify(inputArtifact, relativeTo: projectRoot)
+                if !integrity.isVerified {
+                    recordBlocked = true
+                    add(
+                        "SIGNOFF_INPUT_ARTIFACT_INTEGRITY_FAILED",
+                        integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "),
+                        axis: axis,
+                        entity: inputArtifact.path
+                    )
+                }
+            }
+            let qualificationArtifacts = qualification.identityArtifacts.all
+                + qualification.evidenceArtifacts
+                + qualification.inputArtifacts
+                + qualification.outputArtifacts
+            for retainedArtifact in Set(qualificationArtifacts) {
+                let integrity = verifier.verify(retainedArtifact, relativeTo: projectRoot)
+                if !integrity.isVerified {
+                    recordBlocked = true
+                    add(
+                        "QUALIFICATION_ARTIFACT_INTEGRITY_FAILED",
+                        integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "),
+                        axis: axis,
+                        entity: retainedArtifact.path
+                    )
+                }
+            }
+            if !qualification.outputArtifacts.contains(record.artifact) {
+                recordBlocked = true
+                add(
+                    "QUALIFICATION_OUTPUT_SCOPE_MISMATCH",
+                    "The signoff output is not retained by the process qualification record.",
+                    axis: axis,
+                    entity: record.evidenceID
+                )
             }
 
             if recordBlocked {
@@ -184,7 +249,7 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
             ["provide_project_root", "resolve_project_relative_artifacts"]
         case "EVIDENCE_ARTIFACT_INTEGRITY_FAILED":
             ["recompute_artifact_digest", "rerun_signoff_stage"]
-        case "INSUFFICIENT_TOOL_QUALIFICATION":
+        case "PROCESS_QUALIFICATION_INVALID", "PROCESS_QUALIFICATION_SCOPE_MISMATCH":
             ["retain_corpus_evidence", "qualify_tool_for_process"]
         case "DESIGN_DIGEST_MISMATCH", "PDK_DIGEST_MISMATCH":
             ["rerun_all_signoff_axes_for_same_revision"]

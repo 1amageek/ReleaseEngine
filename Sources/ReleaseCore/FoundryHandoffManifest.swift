@@ -3,12 +3,12 @@ import CryptoKit
 import CircuiteFoundation
 
 public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 3
 
     public var schemaVersion: Int
     public var releaseID: String
     public var foundryID: String
-    public var signoffBundleDigest: String
+    public var signoffBundleArtifactDigest: String
     public var designDigest: String
     public var pdkDigest: String
     public var layoutDigest: String
@@ -20,7 +20,7 @@ public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
     public init(
         releaseID: String,
         foundryID: String,
-        signoffBundleDigest: String,
+        signoffBundleArtifactDigest: String,
         designDigest: String,
         pdkDigest: String,
         layoutDigest: String,
@@ -33,12 +33,12 @@ public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
         self.schemaVersion = schemaVersion
         self.releaseID = releaseID
         self.foundryID = foundryID
-        self.signoffBundleDigest = signoffBundleDigest
+        self.signoffBundleArtifactDigest = signoffBundleArtifactDigest
         self.designDigest = designDigest
         self.pdkDigest = pdkDigest
         self.layoutDigest = layoutDigest
-        self.artifacts = artifacts
-        self.evidenceIDs = evidenceIDs
+        self.artifacts = artifacts.sorted { $0.id.rawValue < $1.id.rawValue }
+        self.evidenceIDs = evidenceIDs.sorted()
         self.generatedAt = generatedAt
         self.manifestDigest = manifestDigest
     }
@@ -52,7 +52,7 @@ public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
             String(schemaVersion),
             releaseID,
             foundryID,
-            signoffBundleDigest,
+            signoffBundleArtifactDigest,
             designDigest,
             pdkDigest,
             layoutDigest,
@@ -65,5 +65,22 @@ public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
 
     public var isSelfConsistent: Bool {
         manifestDigest == computedManifestDigest()
+    }
+
+    public func canonicalData() throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        return try encoder.encode(self)
+    }
+
+    public static func decodeCanonical(from data: Data) throws -> FoundryHandoffManifest {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let manifest = try decoder.decode(FoundryHandoffManifest.self, from: data)
+        guard try manifest.canonicalData() == data else {
+            throw FoundryHandoffManifestError.nonCanonicalEncoding
+        }
+        return manifest
     }
 }

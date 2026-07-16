@@ -8,15 +8,18 @@ import CircuiteFoundation
 public struct DefaultSignoffEvaluator: SignoffEvaluating {
     private let profileProvider: any SignoffProfileProviding
     private let evidenceValidator: any SignoffEvidenceValidating
+    private let evidenceDigester: any SignoffEvidenceDigesting
     private let now: @Sendable () -> Date
 
     public init(
         profileProvider: any SignoffProfileProviding = DefaultSignoffProfileProvider(),
         evidenceValidator: any SignoffEvidenceValidating = DefaultSignoffEvidenceValidator(),
+        evidenceDigester: any SignoffEvidenceDigesting = CanonicalSignoffEvidenceDigester(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.profileProvider = profileProvider
         self.evidenceValidator = evidenceValidator
+        self.evidenceDigester = evidenceDigester
         self.now = now
     }
 
@@ -90,7 +93,8 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             projectRoot: request.projectRoot.map(URL.init(fileURLWithPath:)),
             designDigest: request.designDigest,
             pdkDigest: request.pdkDigest,
-            profile: profile
+            profile: profile,
+            evaluatedAt: startedAt
         )
         diagnostics.append(contentsOf: evidenceValidation.diagnostics)
 
@@ -220,7 +224,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             guard let finalLayoutDigest = request.finalLayoutDigest, isSHA256(finalLayoutDigest) else {
                 diagnostics.append(diagnostic(
                     "FINAL_LAYOUT_DIGEST_REQUIRED",
-                    "An approved signoff bundle must bind to a final layout SHA-256 digest.",
+                    "A passing signoff bundle must bind to a final layout SHA-256 digest.",
                     entity: request.runID
                 ))
                 status = .blocked
@@ -232,7 +236,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                     artifacts: request.evidenceRecords.map(\.artifact),
                     metadata: metadata,
                     payload: SignoffPayload(
-                        approved: false,
+                        passed: false,
                         blockedAxes: blockedAxes + ["bundle"],
                         bundle: nil,
                         profileID: profile.profileID,
@@ -249,7 +253,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                   isSHA256(bundleArtifact.sha256) else {
                 diagnostics.append(diagnostic(
                     "SIGNOFF_BUNDLE_ARTIFACT_REQUIRED",
-                    "An approved signoff result must provide an immutable release artifact reference with digest and byte count.",
+                    "A passing signoff result must provide an immutable release artifact reference with digest and byte count.",
                     entity: request.runID
                 ))
                 status = .blocked
@@ -261,7 +265,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                     artifacts: request.evidenceRecords.map(\.artifact),
                     metadata: metadata,
                     payload: SignoffPayload(
-                        approved: false,
+                        passed: false,
                         blockedAxes: blockedAxes + ["bundle"],
                         bundle: nil,
                         profileID: profile.profileID,
@@ -273,9 +277,32 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                 )
             }
 
-            let issuedAt = now()
-            let evidenceDigest = makeEvidenceDigest(request.evidenceRecords)
-            let unsignedBundle = SignoffBundle(
+            guard let issuedAt = request.bundleIssuedAt else {
+                diagnostics.append(diagnostic(
+                    "SIGNOFF_BUNDLE_ISSUED_AT_REQUIRED",
+                    "The canonical bundle timestamp must be supplied before evaluating the persisted bundle.",
+                    entity: request.runID
+                ))
+                return envelope(
+                    request: request,
+                    status: .blocked,
+                    diagnostics: diagnostics,
+                    artifacts: request.evidenceRecords.map(\.artifact),
+                    metadata: metadata,
+                    payload: SignoffPayload(
+                        passed: false,
+                        blockedAxes: blockedAxes + ["bundle"],
+                        bundle: nil,
+                        profileID: profile.profileID,
+                        designDigest: request.designDigest,
+                        pdkDigest: request.pdkDigest,
+                        axisResults: axisResults,
+                        waivers: request.waivers
+                    )
+                )
+            }
+            let evidenceDigest = try evidenceDigester.digest(request.evidenceRecords)
+            let bundle = SignoffBundle(
                 bundleID: "\(request.runID)-signoff",
                 profileID: profile.profileID,
                 designDigest: request.designDigest,
@@ -285,36 +312,49 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                 axisResults: axisResults,
                 waivers: request.waivers,
                 evidenceDigest: evidenceDigest,
-                issuedAt: issuedAt,
-                approvalDigest: ""
+                issuedAt: issuedAt
             )
-            let bundle = SignoffBundle(
-                bundleID: unsignedBundle.bundleID,
-                profileID: unsignedBundle.profileID,
-                designDigest: unsignedBundle.designDigest,
-                designProvenance: unsignedBundle.designProvenance,
-                pdkDigest: unsignedBundle.pdkDigest,
-                finalLayoutDigest: unsignedBundle.finalLayoutDigest,
-                axisResults: unsignedBundle.axisResults,
-                waivers: unsignedBundle.waivers,
-                evidenceDigest: unsignedBundle.evidenceDigest,
-                issuedAt: unsignedBundle.issuedAt,
-                approvalDigest: unsignedBundle.computedApprovalDigest()
+            let bundleValidation = validatePersistedBundle(
+                expected: bundle,
+                artifact: bundleArtifact,
+                projectRoot: request.projectRoot.map(URL.init(fileURLWithPath:))
             )
+            guard bundleValidation.isValid else {
+                diagnostics.append(diagnostic(
+                    "SIGNOFF_BUNDLE_CONTENT_MISMATCH",
+                    bundleValidation.message,
+                    entity: bundleArtifact.path
+                ))
+                return envelope(
+                    request: request,
+                    status: .blocked,
+                    diagnostics: diagnostics,
+                    artifacts: request.evidenceRecords.map(\.artifact) + [bundleArtifact],
+                    metadata: metadata,
+                    payload: SignoffPayload(
+                        passed: false,
+                        blockedAxes: blockedAxes + ["bundle"],
+                        bundle: nil,
+                        profileID: profile.profileID,
+                        designDigest: request.designDigest,
+                        pdkDigest: request.pdkDigest,
+                        axisResults: axisResults,
+                        waivers: request.waivers
+                    )
+                )
+            }
             bundleReference = SignoffBundleReference(
                 artifact: bundleArtifact,
                 designDigest: request.designDigest,
                 designProvenance: request.designProvenance,
                 pdkDigest: request.pdkDigest,
-                finalLayoutDigest: finalLayoutDigest,
-                bundleDigest: bundle.approvalDigest,
-                approved: true
+                finalLayoutDigest: finalLayoutDigest
             )
         }
 
         let artifacts = uniqueArtifacts(request.evidenceRecords.map(\.artifact) + [bundleReference?.artifact].compactMap { $0 })
         let payload = SignoffPayload(
-            approved: bundleReference != nil && status == .completed,
+            passed: bundleReference != nil && status == .completed,
             blockedAxes: blockedAxes,
             bundle: bundleReference,
             profileID: profile.profileID,
@@ -354,19 +394,46 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
         if affected.contains(where: { $0.axis != waiver.axis }) { fail("WAIVER_AXIS_MISMATCH", "Waiver scope contains evidence from another signoff axis.") }
         if (waiver.toolID == nil) != (waiver.toolDigest == nil) { fail("WAIVER_TOOL_SCOPE_INCOMPLETE", "Waiver tool scope must provide both tool ID and tool digest, or neither.") }
         if let toolID = waiver.toolID, affected.contains(where: { $0.toolID != toolID }) { fail("WAIVER_TOOL_SCOPE_MISMATCH", "Waiver tool scope does not match affected evidence.") }
-        if let toolDigest = waiver.toolDigest, affected.contains(where: { $0.toolDigest != toolDigest }) { fail("WAIVER_TOOL_DIGEST_MISMATCH", "Waiver tool digest scope does not match affected evidence.") }
+        if let toolDigest = waiver.toolDigest, affected.contains(where: { $0.toolBinaryDigest != toolDigest }) { fail("WAIVER_TOOL_DIGEST_MISMATCH", "Waiver tool digest scope does not match affected evidence.") }
         return (diagnostics.isEmpty, diagnostics)
-    }
-
-    private func makeEvidenceDigest(_ records: [ReleaseSignoffEvidenceReference]) -> String {
-        let material = records.sorted { $0.evidenceID < $1.evidenceID }.map {
-            [$0.evidenceID, $0.axis.rawValue, $0.artifact.path, $0.artifact.sha256, $0.designDigest, $0.pdkDigest, $0.toolID, $0.toolDigest].joined(separator: "|")
-        }.joined(separator: "\n")
-        return SHA256.hash(data: Data(material.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
     private func uniqueArtifacts(_ artifacts: [ArtifactReference]) -> [ArtifactReference] {
         Array(Set(artifacts)).sorted { $0.path < $1.path }
+    }
+
+    private func validatePersistedBundle(
+        expected: SignoffBundle,
+        artifact: ArtifactReference,
+        projectRoot: URL?
+    ) -> (isValid: Bool, message: String) {
+        guard let projectRoot else {
+            return (false, "A project root is required to verify the persisted signoff bundle.")
+        }
+        let integrity = LocalArtifactVerifier().verify(artifact, relativeTo: projectRoot)
+        guard integrity.isVerified else {
+            return (
+                false,
+                integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; ")
+            )
+        }
+        do {
+            let url = try artifact.locator.location.resolvedFileURL(relativeTo: projectRoot)
+            let data = try Data(contentsOf: url)
+            let decoded = try SignoffBundle.decodeCanonical(from: data)
+            let canonical = try expected.canonicalData()
+            let digest = SHA256.hash(data: canonical).map { String(format: "%02x", $0) }.joined()
+            guard decoded == expected,
+                  data == canonical,
+                  artifact.digest.algorithm == .sha256,
+                  artifact.sha256.caseInsensitiveCompare(digest) == .orderedSame,
+                  artifact.byteCount == UInt64(canonical.count) else {
+                return (false, "Stored bundle content, digest, or byte count does not match the computed signoff decision.")
+            }
+            return (true, "")
+        } catch {
+            return (false, "Stored bundle cannot be decoded and verified canonically: \(error.localizedDescription)")
+        }
     }
 
     private func isSHA256(_ value: String) -> Bool {
@@ -416,7 +483,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             artifacts: [],
             metadata: metadata,
             payload: SignoffPayload(
-                approved: false,
+                passed: false,
                 blockedAxes: ["request"],
                 bundle: nil,
                 profileID: request.profileID,

@@ -22,44 +22,26 @@ public struct DefaultSignoffProfileProvider: SignoffProfileProviding {
     public static let digitalProfile = ReleaseSignoffProfile(
         profileID: "digital",
         designKind: .digital,
-        requirements: [
-            requirement(.simulation, required: true, level: .smokeChecked),
-            requirement(.timing, required: true, level: .corpusChecked),
-            requirement(.powerIntegrity, required: true, level: .corpusChecked),
-            requirement(.drc, required: true, level: .corpusChecked),
-            requirement(.lvs, required: true, level: .corpusChecked),
-            requirement(.pex, required: true, level: .corpusChecked),
-            requirement(.erc, required: false),
-            requirement(.esd, required: false),
-            requirement(.latchUp, required: false),
-            requirement(.aging, required: false),
-        ]
+        requirements: productionRequirements
     )
 
     public static let analogProfile = ReleaseSignoffProfile(
         profileID: "analog",
         designKind: .analog,
-        requirements: [
-            requirement(.simulation, required: true, level: .corpusChecked),
-            requirement(.timing, required: false),
-            requirement(.powerIntegrity, required: true, level: .corpusChecked),
-            requirement(.drc, required: true, level: .corpusChecked),
-            requirement(.lvs, required: true, level: .corpusChecked),
-            requirement(.pex, required: true, level: .corpusChecked),
-            requirement(.erc, required: true, level: .corpusChecked),
-            requirement(.esd, required: true, level: .corpusChecked),
-            requirement(.latchUp, required: true, level: .corpusChecked),
-            requirement(.aging, required: true, level: .corpusChecked),
-        ]
+        requirements: productionRequirements
     )
 
     public static let mixedSignalProfile = ReleaseSignoffProfile(
         profileID: "mixed-signal",
         designKind: .mixedSignal,
-        requirements: ReleaseSignoffAxis.allCases.map {
-            requirement($0, required: true, level: $0 == .simulation ? .smokeChecked : .corpusChecked)
-        }
+        requirements: productionRequirements
     )
+
+    private static var productionRequirements: [ReleaseSignoffAxisRequirement] {
+        ReleaseSignoffAxis.allCases.map {
+            requirement($0, required: true, level: .productionEligible)
+        }
+    }
 
     private static func requirement(
         _ axis: ReleaseSignoffAxis,

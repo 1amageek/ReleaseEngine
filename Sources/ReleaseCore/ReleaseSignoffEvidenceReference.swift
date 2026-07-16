@@ -9,9 +9,10 @@ public struct ReleaseSignoffEvidenceReference: Sendable, Hashable, Codable {
     public var designDigest: String
     public var pdkDigest: String
     public var toolID: String
-    public var toolDigest: String
-    public var qualificationLevel: ToolQualificationLevel
-    public var qualificationScope: ToolQualificationScope?
+    public var toolVersion: String
+    public var toolBinaryDigest: String
+    public var inputArtifacts: [ArtifactReference]
+    public var processQualification: ToolProcessQualificationEvidence
     public var disposition: SignoffEvidenceDisposition
     public var reason: String?
 
@@ -22,9 +23,10 @@ public struct ReleaseSignoffEvidenceReference: Sendable, Hashable, Codable {
         designDigest: String,
         pdkDigest: String,
         toolID: String,
-        toolDigest: String,
-        qualificationLevel: ToolQualificationLevel,
-        qualificationScope: ToolQualificationScope? = nil,
+        toolVersion: String,
+        toolBinaryDigest: String,
+        inputArtifacts: [ArtifactReference],
+        processQualification: ToolProcessQualificationEvidence,
         disposition: SignoffEvidenceDisposition,
         reason: String? = nil
     ) {
@@ -34,9 +36,10 @@ public struct ReleaseSignoffEvidenceReference: Sendable, Hashable, Codable {
         self.designDigest = designDigest
         self.pdkDigest = pdkDigest
         self.toolID = toolID
-        self.toolDigest = toolDigest
-        self.qualificationLevel = qualificationLevel
-        self.qualificationScope = qualificationScope
+        self.toolVersion = toolVersion
+        self.toolBinaryDigest = toolBinaryDigest.lowercased()
+        self.inputArtifacts = inputArtifacts
+        self.processQualification = processQualification
         self.disposition = disposition
         self.reason = reason
     }

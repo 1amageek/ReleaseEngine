@@ -25,12 +25,11 @@ jobs:
             local directory="$2"
             git clone --depth 1 --branch main "https://github.com/1amageek/${repository}.git" "../${directory}"
           }
-          clone_package XcircuitePackage XcircuitePackage
+          clone_package CircuiteFoundation CircuiteFoundation
+          clone_package DesignFlowKernel DesignFlowKernel
           clone_package LogicDesign LogicDesign
           clone_package PDKKit PDKKit
           clone_package ToolQualification ToolQualification
-          clone_package SignoffToolSupport SignoffToolSupport
-          clone_package TimingEngine TimingEngine
           clone_package PhysicalDesignEngine PhysicalDesignEngine
 
       - name: Build the release product

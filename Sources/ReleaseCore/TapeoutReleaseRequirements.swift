@@ -9,7 +9,6 @@ public struct TapeoutReleaseRequirements: Sendable, Hashable, Codable {
     public var requiredLayerIDs: [String]
     public var requiredPadCells: [String]
     public var requiredSeal: String
-    public var requireExactStreamIdentity: Bool
 
     public init(
         expectedTopCell: String,
@@ -17,7 +16,6 @@ public struct TapeoutReleaseRequirements: Sendable, Hashable, Codable {
         requiredLayerIDs: [String] = [],
         requiredPadCells: [String] = [],
         requiredSeal: String,
-        requireExactStreamIdentity: Bool = true,
         schemaVersion: Int = Self.currentSchemaVersion
     ) {
         self.schemaVersion = schemaVersion
@@ -26,6 +24,5 @@ public struct TapeoutReleaseRequirements: Sendable, Hashable, Codable {
         self.requiredLayerIDs = requiredLayerIDs
         self.requiredPadCells = requiredPadCells
         self.requiredSeal = requiredSeal
-        self.requireExactStreamIdentity = requireExactStreamIdentity
     }
 }

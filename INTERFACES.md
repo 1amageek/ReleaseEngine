@@ -1,47 +1,33 @@
 # ReleaseEngine Interface Contract
 
-## Common shape
+## Signoff
+
+`SignoffEvaluating.execute(_:)` validates typed evidence for every required axis and compares the computed `SignoffBundle` with a pre-persisted canonical artifact. A successful result means the technical signoff checks passed; it is not human approval.
+
+## Tapeout
+
+`TapeoutPackaging.execute(_:)` verifies the signoff bundle, PDK, final layout, stream-out, XOR result, and handoff artifact. It returns a completed or blocked packaging result and does not authorize release.
+
+## Authorization
 
 ```swift
-public protocol DomainExecuting: Sendable {
-    func execute(
-        _ request: DomainRequest
-    ) async throws -> DomainResult
-}
+public protocol ReleaseAuthorizing: Engine
+where Request == ReleaseAuthorizationRequest,
+      Output == ReleaseAuthorizationResult {}
 ```
 
-Requests carry a schema version, run ID and typed artifact references. Payloads contain domain metrics only. Diagnostics and artifacts belong to the shared envelope.
+`ReleaseAuthorizationRequest` carries:
 
-## Products
+- the canonical signoff bundle reference;
+- one human `FlowApprovalRecord` bound to that exact artifact;
+- required tool identifiers;
+- ToolQualification request/decision pairs that can be independently recomputed;
+- a fixed evaluation time.
 
-### ReleaseCore
+Artifact access and ToolQualification execution are injected into the authorizer. The request contains no filesystem path or concrete storage dependency.
 
-Signoff and tapeout references.
-
-### SignoffEngine
-
-Required-axis applicability and verdict.
-
-### TapeoutEngine
-
-Stream-out validation and foundry handoff.
-
-### ReleaseEngine
-
-Umbrella API.
-
-
-## Error contract
-
-- Throw only when execution cannot produce a valid result envelope.
-- Represent design findings and failed checks as typed diagnostics and a completed domain payload.
-- Represent missing prerequisites or insufficient semantics as `blocked`.
-- Preserve cancellation as `cancelled`.
-- Do not swallow parser, process or persistence failures.
+The output status is `.authorized` only when approval, trust, artifact integrity, canonical bytes, release bindings, and exact signoff-axis coverage all pass. Otherwise it is `.blocked` with structured diagnostics.
 
 ## Composition
 
-Xcircuite invokes these protocols directly and persists returned
-`ArtifactReference` values in its workspace store. DesignFlowKernel owns flow
-status, approval and resume; ToolQualification owns capability and trust
-decisions. Engines only return domain results, diagnostics and provenance.
+Xcircuite persists Foundation artifacts and invokes these protocols directly. DesignFlowKernel controls run lifecycle and approval. ToolQualification owns trust. ReleaseEngine does not import Xcircuite or UI state.
