@@ -1,5 +1,46 @@
 // swift-tools-version: 6.3
 import PackageDescription
+import Foundation
+
+let workspaceRoot = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
+
+let circuiteFoundationDependency: Package.Dependency = FileManager.default.fileExists(
+    atPath: workspaceRoot.appendingPathComponent("CircuiteFoundation/Package.swift").path
+)
+    ? .package(path: "../CircuiteFoundation")
+    : .package(url: "https://github.com/1amageek/CircuiteFoundation.git", revision: "2ec6ee13a89ac6885be3c26b41a9ee0ef89948ac")
+
+let pdkKitDependency: Package.Dependency = FileManager.default.fileExists(
+    atPath: workspaceRoot.appendingPathComponent("PDKKit/Package.swift").path
+)
+    ? .package(path: "../PDKKit")
+    : .package(url: "https://github.com/1amageek/PDKKit.git", revision: "aa145dfaa67454c44ac7767c37a28ab7f4b1d2e2")
+
+let toolQualificationDependency: Package.Dependency = FileManager.default.fileExists(
+    atPath: workspaceRoot.appendingPathComponent("ToolQualification/Package.swift").path
+)
+    ? .package(path: "../ToolQualification")
+    : .package(url: "https://github.com/1amageek/ToolQualification.git", revision: "32b031b5322f1ccb0ef78466faab0f895d47c4fd")
+
+let designFlowKernelDependency: Package.Dependency = FileManager.default.fileExists(
+    atPath: workspaceRoot.appendingPathComponent("DesignFlowKernel/Package.swift").path
+)
+    ? .package(path: "../DesignFlowKernel")
+    : .package(url: "https://github.com/1amageek/DesignFlowKernel.git", revision: "8b6c25876ae8f594ad1ac068cee6a156b6a1ad4b")
+
+let physicalDesignEngineDependency: Package.Dependency = FileManager.default.fileExists(
+    atPath: workspaceRoot.appendingPathComponent("PhysicalDesignEngine/Package.swift").path
+)
+    ? .package(path: "../PhysicalDesignEngine")
+    : .package(url: "https://github.com/1amageek/PhysicalDesignEngine.git", revision: "2a3f4215319b8515120f19a5bcb5627122663ff3")
+
+let logicDesignDependency: Package.Dependency = FileManager.default.fileExists(
+    atPath: workspaceRoot.appendingPathComponent("LogicDesign/Package.swift").path
+)
+    ? .package(path: "../LogicDesign")
+    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "8e0c8c2c63152aa45bf12d943fa034bb1aba0f1e")
 
 let package = Package(
     name: "ReleaseEngine",
@@ -12,12 +53,12 @@ let package = Package(
         .executable(name: "release-engine", targets: ["ReleaseEngineCLI"]),
     ],
     dependencies: [
-        .package(path: "../CircuiteFoundation"),
-        .package(path: "../PDKKit"),
-        .package(path: "../ToolQualification"),
-        .package(path: "../DesignFlowKernel"),
-        .package(path: "../PhysicalDesignEngine"),
-        .package(path: "../LogicDesign"),
+        circuiteFoundationDependency,
+        pdkKitDependency,
+        toolQualificationDependency,
+        designFlowKernelDependency,
+        physicalDesignEngineDependency,
+        logicDesignDependency,
     ],
     targets: [
         .target(

@@ -35,6 +35,19 @@ ToolQualification inputs ─┘          │
 
 Authorization requires exact unique coverage of all sixteen release axes, an approval bound to the exact bundle artifact, and one reproducible eligible trust decision for every required tool. No result or bundle can approve itself.
 
-## Development
+## Build and integration
+
+`Package.swift` resolves every dependency independently. A sibling checkout is
+used when its `Package.swift` exists; otherwise SwiftPM uses the pinned GitHub
+revision. No umbrella repository is required to activate local dependencies.
+
+| Dependency | Local sibling | Remote fallback revision |
+|---|---|---|
+| CircuiteFoundation | `../CircuiteFoundation` | `2ec6ee13a89ac6885be3c26b41a9ee0ef89948ac` |
+| PDKKit | `../PDKKit` | `aa145dfaa67454c44ac7767c37a28ab7f4b1d2e2` |
+| ToolQualification | `../ToolQualification` | `32b031b5322f1ccb0ef78466faab0f895d47c4fd` |
+| DesignFlowKernel | `../DesignFlowKernel` | `8b6c25876ae8f594ad1ac068cee6a156b6a1ad4b` |
+| PhysicalDesignEngine | `../PhysicalDesignEngine` | `2a3f4215319b8515120f19a5bcb5627122663ff3` |
+| LogicDesign | `../LogicDesign` | `8e0c8c2c63152aa45bf12d943fa034bb1aba0f1e` |
 
 Use the workspace verifier or an Xcode package scheme with a timeout. Tests cover human/agent approval separation, trust recomputation, bundle integrity, and complete axis coverage.
