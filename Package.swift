@@ -22,7 +22,7 @@ let toolQualificationDependency: Package.Dependency = FileManager.default.fileEx
     atPath: workspaceRoot.appendingPathComponent("ToolQualification/Package.swift").path
 )
     ? .package(path: "../ToolQualification")
-    : .package(url: "https://github.com/1amageek/ToolQualification.git", revision: "1856a1bc5660febbe2f0358d3e5e0262e496b3d3e")
+    : .package(url: "https://github.com/1amageek/ToolQualification.git", revision: "1856a1bc5660febbe2f0358d3e5e0262e496b3d3")
 
 let designFlowKernelDependency: Package.Dependency = FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("DesignFlowKernel/Package.swift").path
