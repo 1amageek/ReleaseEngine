@@ -10,7 +10,7 @@ import ToolQualification
 struct ReleaseAuthorizationTests {
     @Test("human approval and independently reproducible trust authorize an exact signoff bundle")
     func authorizesBoundInputs() async throws {
-        let fixture = try Fixture()
+        let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
 
         let result = try await fixture.authorizer().execute(fixture.request())
@@ -22,7 +22,7 @@ struct ReleaseAuthorizationTests {
 
     @Test("agent approval fails closed")
     func rejectsAgentApproval() async throws {
-        let fixture = try Fixture()
+        let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
         var request = fixture.request()
         request = fixture.request(approval: FlowApprovalRecord(
@@ -43,7 +43,7 @@ struct ReleaseAuthorizationTests {
 
     @Test("status-only or tampered trust fails independent recomputation")
     func rejectsUnreproducibleTrust() async throws {
-        let fixture = try Fixture()
+        let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
         let request = fixture.request(decisions: [ToolTrustDecision(
             toolID: fixture.toolID,
@@ -59,7 +59,7 @@ struct ReleaseAuthorizationTests {
 
     @Test("missing signoff axis fails closed")
     func rejectsIncompleteAxisCoverage() async throws {
-        let fixture = try Fixture(includeAllAxes: false)
+        let fixture = try await Fixture(includeAllAxes: false)
         defer { removeFixture(fixture.root) }
 
         let result = try await fixture.authorizer().execute(fixture.request())
@@ -70,7 +70,7 @@ struct ReleaseAuthorizationTests {
 
     @Test("approval must bind the exact run and release stage")
     func rejectsApprovalScopeMismatch() async throws {
-        let fixture = try Fixture()
+        let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
         let base = fixture.request()
         let approval = FlowApprovalRecord(
@@ -90,7 +90,7 @@ struct ReleaseAuthorizationTests {
 
     @Test("a rejected human verdict cannot authorize release")
     func rejectsNegativeApprovalVerdict() async throws {
-        let fixture = try Fixture()
+        let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
         let base = fixture.request()
         let approval = FlowApprovalRecord(
@@ -110,7 +110,7 @@ struct ReleaseAuthorizationTests {
 
     @Test("approval cannot be timestamped after authorization")
     func rejectsFutureApprovalTimestamp() async throws {
-        let fixture = try Fixture()
+        let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
         let base = fixture.request()
         let approval = FlowApprovalRecord(
@@ -130,7 +130,7 @@ struct ReleaseAuthorizationTests {
 
     @Test("approval evidence must bind the exact signoff artifact")
     func rejectsApprovalEvidenceMismatch() async throws {
-        let fixture = try Fixture()
+        let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
         let base = fixture.request()
         let approval = FlowApprovalRecord(
@@ -150,7 +150,7 @@ struct ReleaseAuthorizationTests {
 
     @Test("release must declare required tools")
     func rejectsEmptyRequiredToolSet() async throws {
-        let fixture = try Fixture()
+        let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
         let base = fixture.request()
         let request = fixture.replacing(base, requiredToolIDs: [])
@@ -162,7 +162,7 @@ struct ReleaseAuthorizationTests {
 
     @Test("duplicate retained trust decisions fail closed")
     func rejectsDuplicateTrustDecisions() async throws {
-        let fixture = try Fixture()
+        let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
         let base = fixture.request()
         let request = fixture.replacing(base, decisions: [fixture.decision, fixture.decision])
@@ -174,7 +174,7 @@ struct ReleaseAuthorizationTests {
 
     @Test("every required tool needs a retained decision and qualification request")
     func rejectsMissingRequiredToolTrust() async throws {
-        let fixture = try Fixture()
+        let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
         let base = fixture.request()
         let request = fixture.replacing(base, requiredToolIDs: [fixture.toolID, "missing-tool"])
@@ -186,7 +186,7 @@ struct ReleaseAuthorizationTests {
 
     @Test("tool qualification cannot be newer than release authorization")
     func rejectsFutureQualificationTimestamp() async throws {
-        let fixture = try Fixture()
+        let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
         let base = fixture.request()
         let original = fixture.qualificationRequest
@@ -214,7 +214,7 @@ private struct Fixture {
     let qualificationRequest: ToolQualificationRequest
     let decision: ToolTrustDecision
 
-    init(includeAllAxes: Bool = true) throws {
+    init(includeAllAxes: Bool = true) async throws {
         root = FileManager.default.temporaryDirectory
             .appending(path: "release-authorization-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -249,13 +249,76 @@ private struct Fixture {
         try Data("plan".utf8).write(to: root.appending(path: "plan.json"), options: .atomic)
         planArtifact = try Self.reference(path: "plan.json", role: .input, kind: .request, root: root)
 
+        let qualificationIssuer = try ProducerIdentity(
+            kind: .engine,
+            identifier: "release-test-qualification-runner",
+            version: "1.0.0"
+        )
+        let qualificationInputData = Data("qualification-input".utf8)
+        let qualificationInputPath = "qualification/input.json"
+        let qualificationInputURL = root.appending(path: qualificationInputPath)
+        try FileManager.default.createDirectory(
+            at: qualificationInputURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try qualificationInputData.write(to: qualificationInputURL, options: .atomic)
+        let qualificationInput = try Self.reference(
+            path: qualificationInputPath,
+            role: .input,
+            kind: .request,
+            producer: qualificationIssuer,
+            root: root
+        )
+
+        let qualificationOutputData = Data("qualification-output".utf8)
+        let qualificationOutputPath = "qualification/output.json"
+        try qualificationOutputData.write(
+            to: root.appending(path: qualificationOutputPath),
+            options: .atomic
+        )
+        let qualificationOutput = try Self.reference(
+            path: qualificationOutputPath,
+            role: .output,
+            kind: .report,
+            producer: qualificationIssuer,
+            root: root
+        )
+        let smokeResult = ToolSmokeQualificationResult(
+            resultID: "release-test-tool-smoke",
+            qualificationID: "release-test-tool-qualification",
+            toolID: toolID,
+            issuer: qualificationIssuer,
+            inputArtifacts: [qualificationInput],
+            outputArtifacts: [qualificationOutput],
+            checkedAt: evaluatedAt
+        )
+        let smokeResultPath = "qualification/smoke-result.json"
+        try smokeResult.canonicalData().write(
+            to: root.appending(path: smokeResultPath),
+            options: .atomic
+        )
+        let smokeResultArtifact = try Self.reference(
+            path: smokeResultPath,
+            role: .output,
+            kind: .evidence,
+            producer: qualificationIssuer,
+            root: root
+        )
         let descriptor = ToolDescriptor(
             toolID: toolID,
             displayName: "Release test tool",
             kind: .reporting,
             version: "1.0.0",
             capabilities: [ToolCapability(operationID: "release.authorize")],
-            trustProfile: ToolTrustProfile(level: .smokeChecked),
+            trustProfile: ToolTrustProfile(
+                level: .smokeChecked,
+                evidence: [ToolEvidence(
+                    evidenceID: smokeResult.resultID,
+                    kind: .smoke,
+                    artifact: smokeResultArtifact,
+                    checkedAt: evaluatedAt
+                )]
+            ),
             environment: ToolEnvironment(platform: "macOS")
         )
         let requirement = ToolTrustRequirement(
@@ -267,9 +330,20 @@ private struct Fixture {
         qualificationRequest = ToolQualificationRequest(
             descriptor: descriptor,
             requirement: requirement,
+            inputs: [smokeResultArtifact],
             evaluatedAt: evaluatedAt
         )
-        decision = ToolTrustDecision(toolID: toolID, status: .eligible)
+        let qualificationEvaluatedAt = evaluatedAt
+        let qualificationEngine = DefaultToolQualificationEngine(
+            artifactReader: LocalToolQualificationArtifactReader(workspaceRoot: root),
+            producer: try ProducerIdentity(
+                kind: .library,
+                identifier: "ToolQualification",
+                version: "1.0.0"
+            ),
+            completionDate: { qualificationEvaluatedAt }
+        )
+        decision = try await qualificationEngine.execute(qualificationRequest).decision
     }
 
     func request(
@@ -336,6 +410,7 @@ private struct Fixture {
         path: String,
         role: ArtifactRole,
         kind: ArtifactKind,
+        producer: ProducerIdentity? = nil,
         root: URL
     ) throws -> ArtifactReference {
         try LocalArtifactReferencer().reference(
@@ -345,7 +420,8 @@ private struct Fixture {
                 kind: kind,
                 format: .json
             ),
-            relativeTo: root
+            relativeTo: root,
+            producer: producer
         )
     }
 }
