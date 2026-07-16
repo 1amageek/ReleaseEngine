@@ -1,153 +1,61 @@
 # ReleaseEngine Milestones
 
-ReleaseEngine has two different completion dimensions:
-
-1. Native contract capability: the package can evaluate structured requests deterministically.
-2. Release readiness: a process-scoped, retained, oracle-correlated, human-approved release can be reproduced and resumed.
-
-Native capability is not evidence of process qualification. Every milestone below has an exit evidence contract and a fail-closed condition.
+ReleaseEngine owns technical signoff evaluation, tapeout packaging, and final release authorization. It does not qualify tools, approve its own output, or own flow persistence.
 
 ## M0 — Responsibility boundary and canonical artifacts
 
 Status: complete.
 
-Exit evidence:
-
-- ReleaseEngine owns typed release contracts and native validators.
-- Standard artifacts and Foundation `ArtifactReference` remain the source of truth.
+- Requests and results are typed domain values.
+- Artifact identity, integrity, diagnostics, and provenance use CircuiteFoundation.
 - ReleaseEngine does not import Xcircuite or UI code.
+- Tool trust decisions are owned by ToolQualification.
+- Run lifecycle and human approval records are owned by DesignFlowKernel.
 
-## M1 — Native signoff and tapeout decision path
+## M1 — Native signoff evaluation
 
 Status: complete.
 
-Exit evidence:
-
-- Digital, analog, and mixed-signal profiles exist.
+- Digital, analog, and mixed-signal profiles define exact release-axis coverage.
 - Required, failed, blocked, profile-approved-not-applicable, and waived states are explicit.
-- Artifact integrity, design/PDK/tool binding, stream-out validation, exact-stream comparison, immutable bundle and handoff checks pass regression tests.
-- Deterministic `release-engine profile/signoff/tapeout` commands exist.
+- Evidence integrity, design/PDK/tool binding, freshness, and waiver scope fail closed.
+- `release-engine signoff` emits a typed `SignoffResult`; it never grants human approval.
 
-## M2 — Retained corpus qualification input
+## M2 — Tapeout packaging and foundry handoff
 
-Status: complete for retained-corpus qualification input.
+Status: complete.
 
-Scope:
+- The tapeout path verifies the signoff bundle, final layout, stream-out, XOR result, release artifact, and foundry handoff manifest.
+- Canonical bytes, digests, byte counts, design identity, PDK identity, and top-cell identity are checked before completion.
+- `release-engine tapeout` emits a typed `TapeoutResult`; completion means packaging is internally consistent, not that release is authorized.
 
-- Parse retained corpus suite and report artifacts without depending on DesignFlowKernel.
-- Verify suite/report/evidence artifact integrity and report provenance.
-- Enforce domain/lane coverage, case count, coverage, pass rate, freshness, process scope and qualification thresholds.
-- Emit a typed qualification result that is consumable by SignoffEngine and Xcircuite.
+## M3 — Independent tool trust input
 
-Exit evidence:
+Status: complete.
 
-- Positive retained corpus fixture produces `completed` + `qualified=true`.
-- Missing oracle lane, stale report, tampered artifact, missing process scope and weak metrics produce structured fail-closed results.
-- JSON round-trip and seven retained-qualification regression tests pass.
-- `release-engine qualify --request <path|->` and Xcircuite release qualification composition are implemented; Xcircuite invokes the typed ReleaseEngine protocol directly and persists the domain result under the run stage.
+- Release authorization accepts ToolQualification request/decision pairs for every required tool.
+- The authorizer recomputes each decision through an injected ToolQualification engine and compares it with the supplied decision.
+- Scope, capability, implementation identity, retained evidence, freshness, and evaluation time must match exactly.
+- ReleaseEngine contains no tool-qualification gate, promotion model, or self-issued trust state.
 
-M2 boundary:
+## M4 — Human-bound release authorization
 
-- This milestone validates retained evidence input and native corpus policy evaluation.
-- It does not claim that an external oracle result exists, that the process is production-qualified, or that a human has approved the release.
+Status: complete.
 
-## M3 — Reference oracle correlation
+- `ReleaseAuthorizationRequest` binds a human `FlowApprovalRecord` to the exact run, release stage, and canonical signoff bundle artifact.
+- Authorization requires exact unique coverage of all sixteen release axes and independently reproducible eligible trust for every required tool.
+- Rejected, non-human, stale, mismatched, incomplete, duplicated, or self-referential input remains blocked with typed diagnostics.
+- `release-engine authorize` emits `.authorized` only when every technical, trust, integrity, and approval condition passes.
 
-Status: complete for the structured oracle-correlation contract.
+## M5 — Xcircuite and DesignFlowKernel composition
 
-Contract requirements:
+Status: complete at the package boundary.
 
-- Each required oracle lane identifies its backend, corpus, probe and report artifact.
-- Native and external lane case IDs/coverage tags are comparable.
-- Agreement, mismatch and oracle-unavailable states are retained per domain.
-- No oracle agreement is inferred from native pass rate.
+- Xcircuite owns concrete workspace persistence and invokes ReleaseEngine protocols directly.
+- DesignFlowKernel owns run transitions, approval capture, review, and resume.
+- ToolQualification owns capability and trust decisions.
+- ReleaseEngine remains independently buildable and has no storage adapter or compatibility facade.
 
-Exit evidence:
+## External release evidence
 
-- Required external lanes identify backend, corpus specification, report and probes.
-- Native and oracle case IDs, domains, coverage tags, probe IDs, statuses and explicit agreement are correlated one-to-one.
-- Case-set mismatch, coverage mismatch, probe mismatch, unavailable oracle and disagreement produce typed fail-closed diagnostics.
-- `RetainedQualificationTests` covers passing correlation, case disagreement and case-set mismatch.
-
-M3 boundary:
-
-- ReleaseEngine consumes structured oracle evidence; it does not invoke an external geometry or signoff binary.
-- Backend execution and oracle artifact production remain owned by the Xcircuite/tool integration layer.
-
-## M4 — Process-scoped qualification and promotion
-
-Status: complete for the process-scoped promotion contract.
-
-Contract requirements:
-
-- `ToolQualificationScope` matches implementation, binary, algorithm, process and deck digests.
-- Promotion to `oracleChecked` or `productionEligible` requires the corresponding retained evidence kinds and freshness.
-- Scope mismatch, stale evidence and future timestamps block promotion.
-
-Exit evidence:
-
-- Fresh, scope-matching failed evidence is reported as a failed qualification lane; missing or unscoped evidence remains blocked.
-- Production promotion requires an explicit qualified production-approval evidence item.
-- Promotion status and failure codes are persisted in `ReleaseQualificationPayload`.
-- `RetainedQualificationTests` covers oracle-checked and production-eligible promotion paths.
-
-M4 boundary:
-
-- Process promotion is a deterministic evaluation of supplied evidence. It is not foundry approval and does not manufacture production evidence.
-
-## M5 — Retention CI and release envelope
-
-Status: complete for the retained CI and release-envelope contract.
-
-Exit evidence:
-
-- Workflow run, history, dashboard and retention-index artifacts are immutable and cross-referenced.
-- Missing, short-retention, stale or non-append-only history blocks the release envelope.
-- DesignFlowKernel owns the envelope builder; ReleaseEngine supplies typed qualification evidence.
-
-Current evidence:
-
-- DesignFlowKernel validates a hash-chained JSONL qualification history, source dashboard digest, append-only advancement and minimum retention window.
-- `design-flow build-retention-index` persists `qualification/retention-index.json` and registers `qualification-retention-index` in the run manifest.
-- `design-flow validate-retention-index` exposes the same validation contract to Agent and CI callers.
-- Release envelopes consume and content-validate both the raw ReleaseEngine qualification result and the retention index.
-- ReleaseEngine owns a repository CI workflow that builds the local package graph, runs its full test target, replays the retained qualification fixture, and uploads the resulting JSON artifact with a 90-day retention setting.
-- DesignFlowKernel is published as `1amageek/DesignFlowKernel`; workflow run `29216074024` passed the CLI build, retention regression, retention-index build/validation, and 90-day artifact upload steps.
-
-Remaining exit evidence:
-
-- A production release still requires the selected process profile's external qualification and foundry approval evidence; native CI success does not manufacture either decision.
-
-## M6 — Xcircuite headless flow and human approval/resume
-
-Status: complete for the qualification-stage and release-profile approval/resume path.
-
-Current evidence:
-
-- Release signoff and tapeout stage executors load project-relative requests, persist typed results and map typed status/gates.
-- The qualification stage executor loads a project-relative qualification request, injects the flow project root, persists the typed result, and maps `payload.qualified` to the release gate.
-- The qualification stage participates in the shared run ledger approval gate; an approved `release.qualification` stage resumes with the same run ID and registered result artifact.
-- A release profile integration fixture executes signoff → qualification → tapeout → profile under one run ID, records approval for each gated stage, resumes three times, and persists all typed stage results in the same run manifest.
-- DesignFlowKernel preserves the immutable reviewed stage result used by an approval, so later resumes do not invalidate earlier approvals when the applied gate changes the current result hash.
-
-Remaining hardening evidence:
-
-- Explicit waiver/rejection policy and the complete profile-level release packet remain M7 evidence concerns.
-
-## M7 — Release-profile eligibility
-
-Status: implemented as a native fail-closed contract; production evidence remains blocked until supplied.
-
-Exit evidence:
-
-- M0–M6 exit evidence is present for the selected process profile.
-- A human approval record references the final signoff bundle, qualification digest and handoff manifest.
-- A reproducible release decision packet can be inspected by both Agent and human.
-
-Current implementation evidence:
-
-- `release-engine eligibility --request <path|->` evaluates the complete stage evidence contract and emits deterministic eligible/blocked payloads.
-- Xcircuite exposes `release.profile` as an agent-facing runtime stage and persists its typed ReleaseEngine result.
-- Corpus-only qualification, non-human approval, digest mismatch and missing packet binding remain blocked by regression tests.
-
-Current blockers are tracked in `GOAL_STATUS.md` and `QUALIFICATION.md`. A source type, local smoke test or successful build never closes a qualification milestone by itself.
+Package completion does not manufacture foundry acceptance. A real release remains blocked until callers supply the selected process profile, foundry decks, qualified external tool evidence, exact artifacts, and an authorized human decision. This is an evidence condition, not an unimplemented ReleaseEngine API.

@@ -24,5 +24,3 @@ ReleaseEngine turns immutable domain evidence into three distinct outputs: a sig
 - Missing, duplicate, failed, or blocked axes reject authorization.
 - Bundle and handoff schemas contain no self-approval flag or approval digest.
 - Tapeout accepts byte identity or retained production-qualified geometric XOR evidence.
-
-The canonical release-profile API is the only public release-profile surface.

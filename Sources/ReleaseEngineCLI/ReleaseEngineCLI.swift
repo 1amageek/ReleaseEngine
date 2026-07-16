@@ -146,10 +146,10 @@ struct ReleaseEngineCLI {
         release-engine profile [--profile <digital|analog|mixed-signal>]
         release-engine signoff --request <path|->
         release-engine tapeout --request <path|->
-          release-engine authorize --request <path|-> --project-root <path>
+        release-engine authorize --request <path|-> --project-root <path>
 
-        The signoff, tapeout, qualify, and eligibility commands emit JSON envelopes.
-        Exit codes: 0 completed, 2 blocked, 3 failed, 4 cancelled.
+        The signoff, tapeout, and authorize commands emit typed JSON results.
+        Exit codes: 0 completed or authorized, 2 blocked, 3 failed, 4 cancelled.
         """)
     }
 }
