@@ -19,7 +19,7 @@ let pdkKitDependency: Package.Dependency = isLSIWorkspace && FileManager.default
     atPath: workspaceRoot.appendingPathComponent("PDKKit/Package.swift").path
 )
     ? .package(path: "../PDKKit")
-    : .package(url: "https://github.com/1amageek/PDKKit.git", revision: "b0d0ab30b044266e1ce3bd008dcec844e51f2302")
+    : .package(url: "https://github.com/1amageek/PDKKit.git", revision: "28f3b83304ad2bbb0c2e0269d26616081d90d992")
 
 let toolQualificationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("ToolQualification/Package.swift").path
@@ -31,19 +31,19 @@ let designFlowKernelDependency: Package.Dependency = isLSIWorkspace && FileManag
     atPath: workspaceRoot.appendingPathComponent("DesignFlowKernel/Package.swift").path
 )
     ? .package(path: "../DesignFlowKernel")
-    : .package(url: "https://github.com/1amageek/DesignFlowKernel.git", revision: "4d137eed01e01065fbf028b61cb58200fe138481")
+    : .package(url: "https://github.com/1amageek/DesignFlowKernel.git", revision: "68e247274e34e56b1337df125b74480196209901")
 
 let physicalDesignEngineDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("PhysicalDesignEngine/Package.swift").path
 )
     ? .package(path: "../PhysicalDesignEngine")
-    : .package(url: "https://github.com/1amageek/PhysicalDesignEngine.git", revision: "e02131875720eb78fa5789e433af22745ea63e9f")
+    : .package(url: "https://github.com/1amageek/PhysicalDesignEngine.git", revision: "a98c0895c0c0340326f79d7838ddc37ba86cfa2b")
 
 let logicDesignDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("LogicDesign/Package.swift").path
 )
     ? .package(path: "../LogicDesign")
-    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "698e54a6861cee247969d89df946d3b0f53c28ca")
+    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "09768ed203d97d1d0f79f786f9988fcb2cd39155")
 
 let package = Package(
     name: "ReleaseEngine",

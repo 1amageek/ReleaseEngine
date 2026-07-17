@@ -37,17 +37,18 @@ Authorization requires exact unique coverage of all sixteen release axes, an app
 
 ## Build and integration
 
-`Package.swift` resolves every dependency independently. A sibling checkout is
-used when its `Package.swift` exists; otherwise SwiftPM uses the pinned GitHub
-revision. No umbrella repository is required to activate local dependencies.
+`Package.swift` resolves every dependency independently. Inside the LSI
+workspace identified by `../docs/workspace-packages.json`, an available sibling
+checkout is used. Outside that workspace, SwiftPM uses the pinned GitHub
+revision, so ReleaseEngine builds as an independent repository.
 
 | Dependency | Local sibling | Remote fallback revision |
 |---|---|---|
 | CircuiteFoundation | `../CircuiteFoundation` | `2ec6ee13a89ac6885be3c26b41a9ee0ef89948ac` |
-| PDKKit | `../PDKKit` | `aa145dfaa67454c44ac7767c37a28ab7f4b1d2e2` |
-| ToolQualification | `../ToolQualification` | `32b031b5322f1ccb0ef78466faab0f895d47c4fd` |
-| DesignFlowKernel | `../DesignFlowKernel` | `8b6c25876ae8f594ad1ac068cee6a156b6a1ad4b` |
-| PhysicalDesignEngine | `../PhysicalDesignEngine` | `2a3f4215319b8515120f19a5bcb5627122663ff3` |
-| LogicDesign | `../LogicDesign` | `8e0c8c2c63152aa45bf12d943fa034bb1aba0f1e` |
+| PDKKit | `../PDKKit` | `28f3b83304ad2bbb0c2e0269d26616081d90d992` |
+| ToolQualification | `../ToolQualification` | `f6cacdbf64038a35ab62d70f575a8dd8349e5604` |
+| DesignFlowKernel | `../DesignFlowKernel` | `68e247274e34e56b1337df125b74480196209901` |
+| PhysicalDesignEngine | `../PhysicalDesignEngine` | `a98c0895c0c0340326f79d7838ddc37ba86cfa2b` |
+| LogicDesign | `../LogicDesign` | `09768ed203d97d1d0f79f786f9988fcb2cd39155` |
 
 Use the workspace verifier or an Xcode package scheme with a timeout. Tests cover human/agent approval separation, trust recomputation, bundle integrity, and complete axis coverage.
