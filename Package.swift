@@ -13,37 +13,37 @@ let circuiteFoundationDependency: Package.Dependency = isLSIWorkspace && FileMan
     atPath: workspaceRoot.appendingPathComponent("CircuiteFoundation/Package.swift").path
 )
     ? .package(path: "../CircuiteFoundation")
-    : .package(url: "https://github.com/1amageek/CircuiteFoundation.git", revision: "2ec6ee13a89ac6885be3c26b41a9ee0ef89948ac")
+    : .package(url: "https://github.com/1amageek/CircuiteFoundation.git", revision: "7abcac83517935c9b9f7553d7016d62cffde259d")
 
 let pdkKitDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("PDKKit/Package.swift").path
 )
     ? .package(path: "../PDKKit")
-    : .package(url: "https://github.com/1amageek/PDKKit.git", revision: "28f3b83304ad2bbb0c2e0269d26616081d90d992")
+    : .package(url: "https://github.com/1amageek/PDKKit.git", revision: "b62c5ad7e5819a24977038c2133856caed52f481")
 
 let toolQualificationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("ToolQualification/Package.swift").path
 )
     ? .package(path: "../ToolQualification")
-    : .package(url: "https://github.com/1amageek/ToolQualification.git", revision: "f6cacdbf64038a35ab62d70f575a8dd8349e5604")
+    : .package(url: "https://github.com/1amageek/ToolQualification.git", revision: "d572d950a9dccb699413cd5157d901812354444f")
 
 let designFlowKernelDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("DesignFlowKernel/Package.swift").path
 )
     ? .package(path: "../DesignFlowKernel")
-    : .package(url: "https://github.com/1amageek/DesignFlowKernel.git", revision: "68e247274e34e56b1337df125b74480196209901")
+    : .package(url: "https://github.com/1amageek/DesignFlowKernel.git", revision: "df8307f3b5881495c2e0fa2a5cf9bfadca0ed5ac")
 
 let physicalDesignEngineDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("PhysicalDesignEngine/Package.swift").path
 )
     ? .package(path: "../PhysicalDesignEngine")
-    : .package(url: "https://github.com/1amageek/PhysicalDesignEngine.git", revision: "a98c0895c0c0340326f79d7838ddc37ba86cfa2b")
+    : .package(url: "https://github.com/1amageek/PhysicalDesignEngine.git", revision: "d95e392b223a88a6b87f092524c2d5352ea12fff")
 
 let logicDesignDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("LogicDesign/Package.swift").path
 )
     ? .package(path: "../LogicDesign")
-    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "09768ed203d97d1d0f79f786f9988fcb2cd39155")
+    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "66dc625904fe1da52a1d01454c1c7759eea8f138")
 
 let package = Package(
     name: "ReleaseEngine",
