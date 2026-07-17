@@ -28,7 +28,7 @@ let designFlowKernelDependency: Package.Dependency = FileManager.default.fileExi
     atPath: workspaceRoot.appendingPathComponent("DesignFlowKernel/Package.swift").path
 )
     ? .package(path: "../DesignFlowKernel")
-    : .package(url: "https://github.com/1amageek/DesignFlowKernel.git", revision: "5159da1cb7b7c91a6b7bf92a8ec68daf49820a2b")
+    : .package(url: "https://github.com/1amageek/DesignFlowKernel.git", revision: "8bad03bbccddfb32f3767c8df00e816ee10cd4f3")
 
 let physicalDesignEngineDependency: Package.Dependency = FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("PhysicalDesignEngine/Package.swift").path
