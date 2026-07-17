@@ -37,13 +37,13 @@ let physicalDesignEngineDependency: Package.Dependency = isLSIWorkspace && FileM
     atPath: workspaceRoot.appendingPathComponent("PhysicalDesignEngine/Package.swift").path
 )
     ? .package(path: "../PhysicalDesignEngine")
-    : .package(url: "https://github.com/1amageek/PhysicalDesignEngine.git", revision: "d95e392b223a88a6b87f092524c2d5352ea12fff")
+    : .package(url: "https://github.com/1amageek/PhysicalDesignEngine.git", revision: "a2b64a3f9f1651be0601496a7423a211c1438c49")
 
 let logicDesignDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("LogicDesign/Package.swift").path
 )
     ? .package(path: "../LogicDesign")
-    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "66dc625904fe1da52a1d01454c1c7759eea8f138")
+    : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "b9aa25b0b78e6168befa25df3bfe8309bd020a6d")
 
 let package = Package(
     name: "ReleaseEngine",
