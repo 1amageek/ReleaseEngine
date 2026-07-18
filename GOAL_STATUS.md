@@ -11,6 +11,6 @@
 | Self-approval removal | Implemented | bundles and payload references contain no self-issued approval state |
 | Authorization surface | Implemented | one `ReleaseAuthorizing` protocol remains |
 | Package build | Passed | timeout-bounded `swift build` |
-| Package tests | Passed | 31 signoff, tapeout, authorization, and contract tests |
+| Package tests | Passed | 30 signoff, tapeout, and authorization tests |
 
 Real foundry rule decks, qualified external tools, and a foundry acceptance decision are external evidence. Their absence produces a blocked result; the package never manufactures them.
