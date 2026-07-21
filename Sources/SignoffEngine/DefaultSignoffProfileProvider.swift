@@ -22,24 +22,38 @@ public struct DefaultSignoffProfileProvider: SignoffProfileProviding {
     public static let digitalProfile = ReleaseSignoffProfile(
         profileID: "digital",
         designKind: .digital,
-        requirements: productionRequirements
+        requirements: productionRequirements(designKind: .digital)
     )
 
     public static let analogProfile = ReleaseSignoffProfile(
         profileID: "analog",
         designKind: .analog,
-        requirements: productionRequirements
+        requirements: productionRequirements(designKind: .analog)
     )
 
     public static let mixedSignalProfile = ReleaseSignoffProfile(
         profileID: "mixed-signal",
         designKind: .mixedSignal,
-        requirements: productionRequirements
+        requirements: productionRequirements(designKind: .mixedSignal)
     )
 
-    private static var productionRequirements: [ReleaseSignoffAxisRequirement] {
+    private static let digitalOnlyAxes: Set<ReleaseSignoffAxis> = [
+        .logicSynthesisEquivalence,
+        .rtlLint,
+        .clockDomainCrossing,
+        .resetDomainCrossing,
+        .formalProof,
+        .scanInsertion,
+        .automaticTestPatternGeneration,
+        .builtInSelfTest,
+    ]
+
+    private static func productionRequirements(
+        designKind: ReleaseDesignKind
+    ) -> [ReleaseSignoffAxisRequirement] {
         ReleaseSignoffAxis.allCases.map {
-            requirement($0, required: true, level: .productionEligible)
+            let required = designKind != .analog || !digitalOnlyAxes.contains($0)
+            return requirement($0, required: required, level: .productionEligible)
         }
     }
 

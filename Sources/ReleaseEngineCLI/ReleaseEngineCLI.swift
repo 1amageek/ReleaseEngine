@@ -67,7 +67,9 @@ struct ReleaseEngineCLI {
     private static func executeTapeout(arguments: [String]) async throws -> TapeoutResult {
         let data = try inputData(arguments: arguments)
         let request = try decoder.decode(TapeoutRequest.self, from: data)
-        return try await DefaultTapeoutPackaging().execute(request)
+        return try await DefaultTapeoutPackaging(
+            artifactPersister: LocalReleaseArtifactStore()
+        ).execute(request)
     }
 
     private static func executeAuthorization(arguments: [String]) async throws -> ReleaseAuthorizationResult {

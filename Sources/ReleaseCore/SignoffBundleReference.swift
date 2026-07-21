@@ -17,9 +17,9 @@ public struct SignoffBundleReference: Sendable, Hashable, Codable {
         finalLayoutDigest: String? = nil
     ) {
         self.artifact = artifact
-        self.designDigest = designDigest
+        self.designDigest = designDigest.lowercased()
         self.designProvenance = designProvenance
-        self.pdkDigest = pdkDigest
-        self.finalLayoutDigest = finalLayoutDigest
+        self.pdkDigest = pdkDigest.lowercased()
+        self.finalLayoutDigest = finalLayoutDigest?.lowercased()
     }
 }

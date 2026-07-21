@@ -7,8 +7,8 @@ public struct CanonicalSignoffEvidenceDigester: SignoffEvidenceDigesting, Sendab
     public init() {}
 
     public func digest(_ evidence: [ReleaseSignoffEvidenceReference]) throws -> String {
-        let normalized = evidence
-            .map(normalize)
+        let normalized = try evidence
+            .map { try normalize($0) }
             .sorted { $0.evidenceID < $1.evidenceID }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -19,8 +19,21 @@ public struct CanonicalSignoffEvidenceDigester: SignoffEvidenceDigesting, Sendab
 
     private func normalize(
         _ evidence: ReleaseSignoffEvidenceReference
-    ) -> ReleaseSignoffEvidenceReference {
-        ReleaseSignoffEvidenceReference(
+    ) throws -> ReleaseSignoffEvidenceReference {
+        let sourceProvenance = evidence.executionProvenance
+        let normalizedProvenance = try ExecutionProvenance(
+            producer: sourceProvenance.producer,
+            supportingTools: sourceProvenance.supportingTools.sorted(by: producerOrder),
+            inputs: sourceProvenance.inputs.sorted(by: artifactOrder),
+            invocation: sourceProvenance.invocation,
+            environment: sourceProvenance.environment,
+            configurationDigest: sourceProvenance.configurationDigest,
+            designRevision: sourceProvenance.designRevision,
+            randomSeed: sourceProvenance.randomSeed,
+            startedAt: sourceProvenance.startedAt,
+            completedAt: sourceProvenance.completedAt
+        )
+        return ReleaseSignoffEvidenceReference(
             evidenceID: evidence.evidenceID,
             axis: evidence.axis,
             artifact: evidence.artifact,
@@ -30,16 +43,49 @@ public struct CanonicalSignoffEvidenceDigester: SignoffEvidenceDigesting, Sendab
             toolVersion: evidence.toolVersion,
             toolBinaryDigest: evidence.toolBinaryDigest,
             inputArtifacts: evidence.inputArtifacts.sorted(by: artifactOrder),
+            executionProvenance: normalizedProvenance,
             processQualification: evidence.processQualification,
             disposition: evidence.disposition,
             reason: evidence.reason
         )
     }
 
+    private func producerOrder(_ lhs: ProducerIdentity, _ rhs: ProducerIdentity) -> Bool {
+        [lhs.kind.rawValue, lhs.identifier, lhs.version, lhs.build ?? ""]
+            .lexicographicallyPrecedes(
+                [rhs.kind.rawValue, rhs.identifier, rhs.version, rhs.build ?? ""]
+            )
+    }
+
     private func artifactOrder(_ lhs: ArtifactReference, _ rhs: ArtifactReference) -> Bool {
-        if lhs.id == rhs.id {
-            return lhs.path < rhs.path
-        }
-        return lhs.id.rawValue < rhs.id.rawValue
+        let lhsKey = [
+            lhs.id.rawValue,
+            lhs.path,
+            lhs.locator.role.rawValue,
+            lhs.kind.rawValue,
+            lhs.format.rawValue,
+            lhs.digest.algorithm.rawValue,
+            lhs.digest.hexadecimalValue,
+            String(lhs.byteCount),
+            lhs.producer?.kind.rawValue ?? "",
+            lhs.producer?.identifier ?? "",
+            lhs.producer?.version ?? "",
+            lhs.producer?.build ?? "",
+        ]
+        let rhsKey = [
+            rhs.id.rawValue,
+            rhs.path,
+            rhs.locator.role.rawValue,
+            rhs.kind.rawValue,
+            rhs.format.rawValue,
+            rhs.digest.algorithm.rawValue,
+            rhs.digest.hexadecimalValue,
+            String(rhs.byteCount),
+            rhs.producer?.kind.rawValue ?? "",
+            rhs.producer?.identifier ?? "",
+            rhs.producer?.version ?? "",
+            rhs.producer?.build ?? "",
+        ]
+        return lhsKey.lexicographicallyPrecedes(rhsKey)
     }
 }

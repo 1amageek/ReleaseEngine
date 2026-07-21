@@ -45,6 +45,12 @@ let logicDesignDependency: Package.Dependency = isLSIWorkspace && FileManager.de
     ? .package(path: "../LogicDesign")
     : .package(url: "https://github.com/1amageek/LogicDesign.git", revision: "b9aa25b0b78e6168befa25df3bfe8309bd020a6d")
 
+let signoffToolSupportDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
+    atPath: workspaceRoot.appendingPathComponent("SignoffToolSupport/Package.swift").path
+)
+    ? .package(path: "../SignoffToolSupport")
+    : .package(url: "https://github.com/1amageek/SignoffToolSupport.git", revision: "6bf675eecb27e3bd3440c5ce8a85c85c510fc3cb")
+
 let package = Package(
     name: "ReleaseEngine",
     platforms: [.macOS(.v26)],
@@ -62,11 +68,12 @@ let package = Package(
         designFlowKernelDependency,
         physicalDesignEngineDependency,
         logicDesignDependency,
+        signoffToolSupportDependency,
     ],
     targets: [
         .target(
             name: "ReleaseCore",
-            dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), .product(name: "PDKCore", package: "PDKKit"), .product(name: "ToolQualification", package: "ToolQualification"), .product(name: "PhysicalDesignCore", package: "PhysicalDesignEngine"), .product(name: "LogicIR", package: "LogicDesign")]
+            dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), .product(name: "DesignFlowKernel", package: "DesignFlowKernel"), .product(name: "PDKCore", package: "PDKKit"), .product(name: "ToolQualification", package: "ToolQualification"), .product(name: "PhysicalDesignCore", package: "PhysicalDesignEngine"), .product(name: "LogicIR", package: "LogicDesign")]
         ),
         .target(
             name: "SignoffEngine",
@@ -74,7 +81,7 @@ let package = Package(
         ),
         .target(
             name: "TapeoutEngine",
-            dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), "ReleaseCore", "SignoffEngine"]
+            dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), .product(name: "SignoffToolSupport", package: "SignoffToolSupport"), .product(name: "ToolQualification", package: "ToolQualification"), "ReleaseCore", "SignoffEngine"]
         ),
         .target(
             name: "ReleaseEngine",
@@ -110,6 +117,7 @@ let package = Package(
                 .product(name: "PhysicalDesignCore", package: "PhysicalDesignEngine"),
                 .product(name: "ToolQualification", package: "ToolQualification"),
                 .product(name: "DesignFlowKernel", package: "DesignFlowKernel"),
+                .product(name: "SignoffToolSupport", package: "SignoffToolSupport"),
             ]
         ),
     ]

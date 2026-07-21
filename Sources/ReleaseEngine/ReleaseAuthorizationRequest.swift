@@ -4,6 +4,9 @@ import ReleaseCore
 import ToolQualification
 
 public struct ReleaseAuthorizationRequest: Sendable, Hashable, Codable {
+    public static let currentSchemaVersion = 1
+
+    public let schemaVersion: Int
     public let runID: String
     public let stageID: String
     public let signoffBundle: SignoffBundleReference
@@ -12,6 +15,7 @@ public struct ReleaseAuthorizationRequest: Sendable, Hashable, Codable {
     public let toolQualificationRequests: [ToolQualificationRequest]
     public let requiredToolIDs: [String]
     public let evaluatedAt: Date
+    public let projectRoot: String?
 
     public init(
         runID: String,
@@ -21,8 +25,10 @@ public struct ReleaseAuthorizationRequest: Sendable, Hashable, Codable {
         toolTrustDecisions: [ToolTrustDecision],
         toolQualificationRequests: [ToolQualificationRequest],
         requiredToolIDs: [String],
-        evaluatedAt: Date
+        evaluatedAt: Date,
+        projectRoot: String? = nil
     ) {
+        self.schemaVersion = Self.currentSchemaVersion
         self.runID = runID
         self.stageID = stageID
         self.signoffBundle = signoffBundle
@@ -31,5 +37,6 @@ public struct ReleaseAuthorizationRequest: Sendable, Hashable, Codable {
         self.toolQualificationRequests = toolQualificationRequests
         self.requiredToolIDs = requiredToolIDs
         self.evaluatedAt = evaluatedAt
+        self.projectRoot = projectRoot
     }
 }

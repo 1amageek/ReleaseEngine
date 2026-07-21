@@ -2,6 +2,15 @@ import Foundation
 
 public enum ReleaseSignoffAxis: String, Sendable, Hashable, Codable, CaseIterable, Comparable {
     case simulation
+    case logicSynthesisEquivalence
+    case rtlLint
+    case clockDomainCrossing
+    case resetDomainCrossing
+    case formalProof
+    case scanInsertion
+    case automaticTestPatternGeneration
+    case builtInSelfTest
+    case powerIntent
     case timing
     case crosstalkNoise
     case electromigration

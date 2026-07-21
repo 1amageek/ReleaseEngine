@@ -1,5 +1,4 @@
 import Foundation
-import CryptoKit
 import LogicIR
 import ReleaseCore
 import ToolQualification
@@ -9,17 +8,20 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
     private let profileProvider: any SignoffProfileProviding
     private let evidenceValidator: any SignoffEvidenceValidating
     private let evidenceDigester: any SignoffEvidenceDigesting
+    private let artifactPersister: any ReleaseArtifactPersisting
     private let now: @Sendable () -> Date
 
     public init(
         profileProvider: any SignoffProfileProviding = DefaultSignoffProfileProvider(),
         evidenceValidator: any SignoffEvidenceValidating = DefaultSignoffEvidenceValidator(),
         evidenceDigester: any SignoffEvidenceDigesting = CanonicalSignoffEvidenceDigester(),
+        artifactPersister: any ReleaseArtifactPersisting = LocalReleaseArtifactStore(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.profileProvider = profileProvider
         self.evidenceValidator = evidenceValidator
         self.evidenceDigester = evidenceDigester
+        self.artifactPersister = artifactPersister
         self.now = now
     }
 
@@ -28,49 +30,38 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
     ) async throws -> SignoffResult {
         let startedAt = now()
         let profile = profileProvider.profile(profileID: request.profileID)
-        let metadata = try ExecutionProvenance(
-            producer: ProducerIdentity(
-                kind: .engine,
-                identifier: "native.release.signoff",
-                version: "1.0.0"
-            ),
-            invocation: ExecutionInvocation.inProcess(
-                entryPoint: "SignoffEngine.DefaultSignoffEvaluator.execute"
-            ),
-            startedAt: startedAt,
-            completedAt: now()
-        )
 
         guard request.schemaVersion == SignoffRequest.currentSchemaVersion else {
-            return blockedEnvelope(
+            return try blockedEnvelope(
                 request: request,
-                metadata: metadata,
+                startedAt: startedAt,
                 diagnostics: [diagnostic("INVALID_REQUEST_SCHEMA", "Unsupported signoff request schema version.", entity: request.runID)]
             )
         }
         guard !request.runID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return blockedEnvelope(
+            return try blockedEnvelope(
                 request: request,
-                metadata: metadata,
+                startedAt: startedAt,
                 diagnostics: [diagnostic("RUN_ID_REQUIRED", "Signoff run ID must not be empty.", entity: nil)]
             )
         }
         guard let profile else {
-            return blockedEnvelope(
+            return try blockedEnvelope(
                 request: request,
-                metadata: metadata,
+                startedAt: startedAt,
                 diagnostics: [diagnostic("SIGNOFF_PROFILE_NOT_FOUND", "The requested signoff profile is not registered.", entity: request.profileID)]
             )
         }
         guard profile.isValid else {
-            return blockedEnvelope(
+            return try blockedEnvelope(
                 request: request,
-                metadata: metadata,
+                startedAt: startedAt,
                 diagnostics: [diagnostic("INVALID_SIGNOFF_PROFILE", "The selected signoff profile is not schema-valid or contains duplicate/empty axis requirements.", entity: request.profileID)]
             )
         }
 
         var diagnostics: [DesignDiagnostic] = []
+        diagnostics.append(contentsOf: validateRequestArtifactBindings(request))
         if profile.designKind != request.designKind {
             diagnostics.append(diagnostic(
                 "SIGNOFF_PROFILE_DESIGN_KIND_MISMATCH",
@@ -106,9 +97,34 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
         var axisResults: [SignoffAxisResult] = []
         var invalidWaiverAxes = Set<ReleaseSignoffAxis>()
         var validWaivers: [ReleaseSignoffAxis: SignoffWaiver] = [:]
+        var seenWaiverIDs = Set<String>()
+        var seenWaiverAxes = Set<ReleaseSignoffAxis>()
 
         for waiver in request.waivers {
-            let result = validateWaiver(waiver, request: request, records: request.evidenceRecords)
+            if !seenWaiverIDs.insert(waiver.waiverID).inserted {
+                diagnostics.append(diagnostic(
+                    "DUPLICATE_WAIVER_ID",
+                    "Waiver IDs must be unique within a signoff request.",
+                    entity: waiver.waiverID
+                ))
+                invalidWaiverAxes.insert(waiver.axis)
+                continue
+            }
+            if !seenWaiverAxes.insert(waiver.axis).inserted {
+                diagnostics.append(diagnostic(
+                    "DUPLICATE_WAIVER_AXIS",
+                    "A signoff axis can have at most one scoped waiver in a release request.",
+                    entity: waiver.axis.rawValue
+                ))
+                invalidWaiverAxes.insert(waiver.axis)
+                continue
+            }
+            let result = validateWaiver(
+                waiver,
+                request: request,
+                records: request.evidenceRecords,
+                evaluatedAt: startedAt
+            )
             diagnostics.append(contentsOf: result.diagnostics)
             if result.isValid {
                 validWaivers[waiver.axis] = waiver
@@ -234,12 +250,12 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                 ))
                 status = .blocked
                 bundleReference = nil
-                return envelope(
+                return try envelope(
                     request: request,
                     status: status,
                     diagnostics: diagnostics,
                     artifacts: request.evidenceRecords.map(\.artifact),
-                    metadata: metadata,
+                    startedAt: startedAt,
                     payload: SignoffPayload(
                         passed: false,
                         blockedAxes: blockedAxes + ["bundle"],
@@ -252,24 +268,23 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                     )
                 )
             }
-            guard let bundleArtifact = request.bundleArtifact,
-                  bundleArtifact.kind == .release,
-                  !bundleArtifact.path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  bundleArtifact.digest.algorithm == .sha256,
-                  isSHA256(bundleArtifact.digest.hexadecimalValue) else {
+            guard request.bundleOutput.location.storage == .workspaceRelative,
+                  request.bundleOutput.role == .output,
+                  request.bundleOutput.kind == .release,
+                  request.bundleOutput.format == .json else {
                 diagnostics.append(diagnostic(
-                    "SIGNOFF_BUNDLE_ARTIFACT_REQUIRED",
-                    "A passing signoff result must provide an immutable release artifact reference with digest and byte count.",
+                    "SIGNOFF_BUNDLE_TARGET_INVALID",
+                    "A passing signoff result must target a project-relative release output in JSON format.",
                     entity: request.runID
                 ))
                 status = .blocked
                 bundleReference = nil
-                return envelope(
+                return try envelope(
                     request: request,
                     status: status,
                     diagnostics: diagnostics,
                     artifacts: request.evidenceRecords.map(\.artifact),
-                    metadata: metadata,
+                    startedAt: startedAt,
                     payload: SignoffPayload(
                         passed: false,
                         blockedAxes: blockedAxes + ["bundle"],
@@ -283,18 +298,18 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                 )
             }
 
-            guard let issuedAt = request.bundleIssuedAt else {
+            guard let projectRoot = request.projectRoot.map(URL.init(fileURLWithPath:)) else {
                 diagnostics.append(diagnostic(
-                    "SIGNOFF_BUNDLE_ISSUED_AT_REQUIRED",
-                    "The canonical bundle timestamp must be supplied before evaluating the persisted bundle.",
+                    "SIGNOFF_BUNDLE_PROJECT_ROOT_REQUIRED",
+                    "A project root is required to generate and verify the immutable signoff bundle.",
                     entity: request.runID
                 ))
-                return envelope(
+                return try envelope(
                     request: request,
                     status: .blocked,
                     diagnostics: diagnostics,
                     artifacts: request.evidenceRecords.map(\.artifact),
-                    metadata: metadata,
+                    startedAt: startedAt,
                     payload: SignoffPayload(
                         passed: false,
                         blockedAxes: blockedAxes + ["bundle"],
@@ -308,6 +323,9 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                 )
             }
             let evidenceDigest = try evidenceDigester.digest(request.evidenceRecords)
+            let toolQualificationScopes = Array(Set(
+                request.evidenceRecords.map(\.processQualification.scope)
+            ))
             let bundle = SignoffBundle(
                 bundleID: "\(request.runID)-signoff",
                 profileID: profile.profileID,
@@ -317,26 +335,55 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                 finalLayoutDigest: finalLayoutDigest,
                 axisResults: axisResults,
                 waivers: request.waivers,
+                evidenceRecords: request.evidenceRecords,
+                evidenceArtifacts: request.evidenceRecords.map(\.artifact),
+                toolQualificationScopes: toolQualificationScopes,
                 evidenceDigest: evidenceDigest,
-                issuedAt: issuedAt
+                issuedAt: now()
             )
-            let bundleValidation = validatePersistedBundle(
-                expected: bundle,
-                artifact: bundleArtifact,
-                projectRoot: request.projectRoot.map(URL.init(fileURLWithPath:))
-            )
-            guard bundleValidation.isValid else {
+            do {
+                let bytes = try bundle.canonicalData()
+                let producer = try ProducerIdentity(
+                    kind: .engine,
+                    identifier: "native.release.signoff",
+                    version: "2.0.0",
+                    build: ReleaseRuntimeIdentity.currentExecutableDigest()
+                )
+                let bundleArtifact = try await artifactPersister.persist(
+                    ReleaseArtifactPersistenceRequest(
+                        locator: request.bundleOutput,
+                        bytes: bytes,
+                        producer: producer
+                    ),
+                    relativeTo: projectRoot
+                )
+                try await verifyPersistedBundle(
+                    expected: bundle,
+                    artifact: bundleArtifact,
+                    expectedLocator: request.bundleOutput,
+                    expectedBytes: bytes,
+                    producer: producer,
+                    projectRoot: projectRoot
+                )
+                bundleReference = SignoffBundleReference(
+                    artifact: bundleArtifact,
+                    designDigest: request.designDigest,
+                    designProvenance: request.designProvenance,
+                    pdkDigest: request.pdkDigest,
+                    finalLayoutDigest: finalLayoutDigest
+                )
+            } catch {
                 diagnostics.append(diagnostic(
-                    "SIGNOFF_BUNDLE_CONTENT_MISMATCH",
-                    bundleValidation.message,
-                    entity: bundleArtifact.path
+                    "SIGNOFF_BUNDLE_PERSISTENCE_BLOCKED",
+                    "The generated signoff bundle could not be persisted and verified immutably: \(error.localizedDescription)",
+                    entity: request.bundleOutput.location.value
                 ))
-                return envelope(
+                return try envelope(
                     request: request,
                     status: .blocked,
                     diagnostics: diagnostics,
-                    artifacts: request.evidenceRecords.map(\.artifact) + [bundleArtifact],
-                    metadata: metadata,
+                    artifacts: request.evidenceRecords.map(\.artifact),
+                    startedAt: startedAt,
                     payload: SignoffPayload(
                         passed: false,
                         blockedAxes: blockedAxes + ["bundle"],
@@ -349,13 +396,6 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                     )
                 )
             }
-            bundleReference = SignoffBundleReference(
-                artifact: bundleArtifact,
-                designDigest: request.designDigest,
-                designProvenance: request.designProvenance,
-                pdkDigest: request.pdkDigest,
-                finalLayoutDigest: finalLayoutDigest
-            )
         }
 
         let artifacts = uniqueArtifacts(request.evidenceRecords.map(\.artifact) + [bundleReference?.artifact].compactMap { $0 })
@@ -369,12 +409,12 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             axisResults: axisResults,
             waivers: request.waivers
         )
-        return envelope(
+        return try envelope(
             request: request,
             status: status,
             diagnostics: diagnostics,
             artifacts: artifacts,
-            metadata: metadata,
+            startedAt: startedAt,
             payload: payload
         )
     }
@@ -382,7 +422,8 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
     private func validateWaiver(
         _ waiver: SignoffWaiver,
         request: SignoffRequest,
-        records: [ReleaseSignoffEvidenceReference]
+        records: [ReleaseSignoffEvidenceReference],
+        evaluatedAt: Date
     ) -> (isValid: Bool, diagnostics: [DesignDiagnostic]) {
         var diagnostics: [DesignDiagnostic] = []
         func fail(_ code: String, _ message: String) {
@@ -393,7 +434,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
         if waiver.reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { fail("WAIVER_REASON_REQUIRED", "Waiver reason must not be empty.") }
         if waiver.authority.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { fail("WAIVER_AUTHORITY_REQUIRED", "Waiver authority must not be empty.") }
         if waiver.affectedEvidenceIDs.isEmpty { fail("WAIVER_SCOPE_REQUIRED", "A waiver must identify affected evidence IDs.") }
-        if waiver.expiresAt <= waiver.approvedAt || waiver.expiresAt <= now() { fail("WAIVER_EXPIRED_OR_INVALID", "Waiver expiry must be after approval and in the future.") }
+        if waiver.expiresAt <= waiver.approvedAt || waiver.expiresAt <= evaluatedAt { fail("WAIVER_EXPIRED_OR_INVALID", "Waiver expiry must be after approval and in the future.") }
         if waiver.designDigest != request.designDigest { fail("WAIVER_DESIGN_DIGEST_MISMATCH", "Waiver is bound to a different design revision.") }
         if waiver.pdkDigest != request.pdkDigest { fail("WAIVER_PDK_DIGEST_MISMATCH", "Waiver is bound to a different PDK revision.") }
         if affected.count != waiver.affectedEvidenceIDs.count { fail("WAIVER_EVIDENCE_NOT_FOUND", "Waiver scope contains an evidence ID that is not present in the request.") }
@@ -405,41 +446,62 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
     }
 
     private func uniqueArtifacts(_ artifacts: [ArtifactReference]) -> [ArtifactReference] {
-        Array(Set(artifacts)).sorted { $0.path < $1.path }
+        Array(Set(artifacts)).sorted { $0.id.rawValue < $1.id.rawValue }
     }
 
-    private func validatePersistedBundle(
+    private func validateRequestArtifactBindings(
+        _ request: SignoffRequest
+    ) -> [DesignDiagnostic] {
+        var diagnostics: [DesignDiagnostic] = []
+        let declaredEvidence = Set(request.evidence)
+        let typedEvidence = Set(request.evidenceRecords.map(\.artifact))
+        if declaredEvidence != typedEvidence {
+            diagnostics.append(diagnostic(
+                "SIGNOFF_EVIDENCE_BINDING_MISMATCH",
+                "The evidence artifact inventory must exactly match the typed signoff evidence records.",
+                entity: request.runID
+            ))
+        }
+
+        let declaredInputs = Set(request.inputs)
+        var requiredInputs = Set(request.evidenceRecords.flatMap(\.inputArtifacts))
+        for qualification in request.evidenceRecords.map(\.processQualification) {
+            requiredInputs.formUnion(qualification.identityArtifacts.all)
+            requiredInputs.formUnion(qualification.evidenceArtifacts)
+            requiredInputs.formUnion(qualification.inputArtifacts)
+            requiredInputs.formUnion(qualification.outputArtifacts)
+        }
+        for missing in requiredInputs.subtracting(declaredInputs).sorted(by: { $0.path < $1.path }) {
+            diagnostics.append(diagnostic(
+                "SIGNOFF_INPUT_BINDING_MISSING",
+                "The signoff request must bind every design, PDK, qualification, and bundle input used by the decision.",
+                entity: missing.path
+            ))
+        }
+        return diagnostics
+    }
+
+    private func verifyPersistedBundle(
         expected: SignoffBundle,
         artifact: ArtifactReference,
-        projectRoot: URL?
-    ) -> (isValid: Bool, message: String) {
-        guard let projectRoot else {
-            return (false, "A project root is required to verify the persisted signoff bundle.")
+        expectedLocator: ArtifactLocator,
+        expectedBytes: Data,
+        producer: ProducerIdentity,
+        projectRoot: URL
+    ) async throws {
+        guard artifact.locator == expectedLocator,
+              artifact.producer == producer else {
+            throw SignoffBundlePersistenceError.referenceMismatch
         }
-        let integrity = LocalArtifactVerifier().verify(artifact, relativeTo: projectRoot)
-        guard integrity.isVerified else {
-            return (
-                false,
-                integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; ")
-            )
+        let expectedDigest = try SHA256ContentDigester().digest(data: expectedBytes)
+        guard artifact.digest == expectedDigest,
+              artifact.byteCount == UInt64(expectedBytes.count) else {
+            throw SignoffBundlePersistenceError.referenceMismatch
         }
-        do {
-            let url = try artifact.locator.location.resolvedFileURL(relativeTo: projectRoot)
-            let data = try Data(contentsOf: url)
-            let decoded = try SignoffBundle.decodeCanonical(from: data)
-            let canonical = try expected.canonicalData()
-            let digest = SHA256.hash(data: canonical).map { String(format: "%02x", $0) }.joined()
-            guard decoded == expected,
-                  data == canonical,
-                  artifact.digest.algorithm == .sha256,
-                  artifact.digest.algorithm == .sha256,
-                  artifact.digest.hexadecimalValue.caseInsensitiveCompare(digest) == .orderedSame,
-                  artifact.byteCount == UInt64(canonical.count) else {
-                return (false, "Stored bundle content, digest, or byte count does not match the computed signoff decision.")
-            }
-            return (true, "")
-        } catch {
-            return (false, "Stored bundle cannot be decoded and verified canonically: \(error.localizedDescription)")
+        let persistedBytes = try await artifactPersister.load(artifact, relativeTo: projectRoot)
+        guard persistedBytes == expectedBytes,
+              try SignoffBundle.decodeCanonical(from: persistedBytes) == expected else {
+            throw SignoffBundlePersistenceError.contentMismatch
         }
     }
 
@@ -464,10 +526,27 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
         status: ReleaseExecutionStatus,
         diagnostics: [DesignDiagnostic],
         artifacts: [ArtifactReference],
-        metadata: ExecutionProvenance,
+        startedAt: Date,
         payload: SignoffPayload
-    ) -> SignoffResult {
-        SignoffResult(
+    ) throws -> SignoffResult {
+        let metadata = try ExecutionProvenance(
+            producer: ProducerIdentity(
+                kind: .engine,
+                identifier: "native.release.signoff",
+                version: "2.0.0",
+                build: ReleaseRuntimeIdentity.currentExecutableDigest()
+            ),
+            inputs: uniqueArtifacts(request.inputs + request.evidence),
+            invocation: ExecutionInvocation.inProcess(
+                entryPoint: "SignoffEngine.DefaultSignoffEvaluator.execute"
+            ),
+            environment: try ReleaseRuntimeIdentity.environmentFingerprint(
+                toolchain: "native.release.signoff-2.0.0"
+            ),
+            startedAt: startedAt,
+            completedAt: now()
+        )
+        return SignoffResult(
             schemaVersion: SignoffRequest.currentSchemaVersion,
             runID: request.runID,
             status: status,
@@ -480,15 +559,15 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
 
     private func blockedEnvelope(
         request: SignoffRequest,
-        metadata: ExecutionProvenance,
+        startedAt: Date,
         diagnostics: [DesignDiagnostic]
-    ) -> SignoffResult {
-        envelope(
+    ) throws -> SignoffResult {
+        try envelope(
             request: request,
             status: .blocked,
             diagnostics: diagnostics,
             artifacts: [],
-            metadata: metadata,
+            startedAt: startedAt,
             payload: SignoffPayload(
                 passed: false,
                 blockedAxes: ["request"],

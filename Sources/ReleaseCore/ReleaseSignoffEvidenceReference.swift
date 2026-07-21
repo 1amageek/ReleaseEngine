@@ -12,6 +12,7 @@ public struct ReleaseSignoffEvidenceReference: Sendable, Hashable, Codable {
     public var toolVersion: String
     public var toolBinaryDigest: String
     public var inputArtifacts: [ArtifactReference]
+    public var executionProvenance: ExecutionProvenance
     public var processQualification: ToolProcessQualificationEvidence
     public var disposition: SignoffEvidenceDisposition
     public var reason: String?
@@ -26,6 +27,7 @@ public struct ReleaseSignoffEvidenceReference: Sendable, Hashable, Codable {
         toolVersion: String,
         toolBinaryDigest: String,
         inputArtifacts: [ArtifactReference],
+        executionProvenance: ExecutionProvenance,
         processQualification: ToolProcessQualificationEvidence,
         disposition: SignoffEvidenceDisposition,
         reason: String? = nil
@@ -33,12 +35,13 @@ public struct ReleaseSignoffEvidenceReference: Sendable, Hashable, Codable {
         self.evidenceID = evidenceID
         self.axis = axis
         self.artifact = artifact
-        self.designDigest = designDigest
-        self.pdkDigest = pdkDigest
+        self.designDigest = designDigest.lowercased()
+        self.pdkDigest = pdkDigest.lowercased()
         self.toolID = toolID
         self.toolVersion = toolVersion
         self.toolBinaryDigest = toolBinaryDigest.lowercased()
         self.inputArtifacts = inputArtifacts
+        self.executionProvenance = executionProvenance
         self.processQualification = processQualification
         self.disposition = disposition
         self.reason = reason

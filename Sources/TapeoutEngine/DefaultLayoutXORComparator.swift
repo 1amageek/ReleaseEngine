@@ -12,8 +12,9 @@ public struct DefaultLayoutXORComparator: LayoutXORComparing {
     public func compare(
         source: ArtifactReference,
         streamed: ArtifactReference,
+        pdkDigest: String,
         projectRoot: URL?
-    ) -> LayoutXORResult {
+    ) async -> LayoutXORResult {
         guard let projectRoot else {
             return LayoutXORResult(
                 status: .blocked,

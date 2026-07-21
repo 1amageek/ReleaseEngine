@@ -7,8 +7,8 @@ ReleaseEngine provides fail-closed signoff, tapeout packaging, and final release
 | Product | Responsibility |
 |---|---|
 | `ReleaseCore` | Signoff axes, canonical signoff bundle, handoff manifest, and typed evidence references |
-| `SignoffEngine` | Validate all production signoff axes and reproduce the persisted canonical bundle |
-| `TapeoutEngine` | Validate stream-out/XOR evidence and reproduce a foundry handoff artifact |
+| `SignoffEngine` | Validate all production signoff axes, generate the canonical bundle, and persist/reload it immutably |
+| `TapeoutEngine` | Generate immutable stream-out and foundry handoff artifacts, then validate stream-out/XOR evidence |
 | `ReleaseEngine` | Authorize release from an independent human flow approval and independently reproducible tool trust |
 
 Tool qualification is not performed by this package. ToolQualification owns trust evaluation; DesignFlowKernel owns human approval. `DefaultReleaseAuthorizer` consumes both inputs separately and fails closed if either cannot be reproduced.
@@ -33,22 +33,31 @@ ToolQualification inputs ─┘          │
                                      └─ re-reads raw retained artifacts
 ```
 
-Authorization requires exact unique coverage of all sixteen release axes, an approval bound to the exact bundle artifact, and one reproducible eligible trust decision for every required tool. No result or bundle can approve itself.
+Authorization requires exact unique coverage of all release axes, including logic equivalence, RTL verification, DFT, and power intent, an approval bound to the exact bundle artifact, and one reproducible production-eligible trust decision for every qualified producer scope retained by the bundle. PEX, STA, and electrical evidence must name their requested operating corners, and every corner must be covered by both corpus and independent-oracle qualification evidence. No result or bundle can approve itself.
+
+Release-native results and artifacts retain the executing binary SHA-256,
+semantic implementation version, invocation, and environment fingerprint.
+Authorization and tapeout reject release evidence whose producer build identity
+is absent or malformed.
+
+Signoff and tapeout artifact persistence are protocol-first. `ReleaseArtifactPersisting` creates an immutable artifact and reloads its bytes after the write. `LocalReleaseArtifactStore` provides standalone project-relative storage; Xcircuite can make its workspace store conform directly to the same protocol to add ledger transactions.
+
+Production tapeout requires `QualifiedGeometricXORExecutor`. Its configuration binds an externally qualified executable and a project-relative JSON report artifact. The executor accepts only GDSII/OASIS layouts, invokes the executable directly, persists the raw canonical report immutably, and records execution provenance plus difference count and area. The foundry handoff retains the complete XOR qualification artifact graph, not only the raw comparison report. `DefaultLayoutXORComparator` is intentionally diagnostic-only: equal file bytes do not prove qualified geometric equivalence and never authorize tapeout.
 
 ## Build and integration
 
-`Package.swift` resolves every dependency independently. Inside the LSI
-workspace identified by `../docs/workspace-packages.json`, an available sibling
-checkout is used. Outside that workspace, SwiftPM uses the pinned GitHub
-revision, so ReleaseEngine builds as an independent repository.
+ReleaseEngine is an independent Swift package. Add the repository to a SwiftPM
+package or Xcode project, then import only the product required by the caller.
+Its package manifest pins the following public repositories for reproducible
+standalone resolution:
 
-| Dependency | Local sibling | Remote fallback revision |
+| Dependency | Repository | Pinned revision |
 |---|---|---|
-| CircuiteFoundation | `../CircuiteFoundation` | `2ec6ee13a89ac6885be3c26b41a9ee0ef89948ac` |
-| PDKKit | `../PDKKit` | `28f3b83304ad2bbb0c2e0269d26616081d90d992` |
-| ToolQualification | `../ToolQualification` | `f6cacdbf64038a35ab62d70f575a8dd8349e5604` |
-| DesignFlowKernel | `../DesignFlowKernel` | `68e247274e34e56b1337df125b74480196209901` |
-| PhysicalDesignEngine | `../PhysicalDesignEngine` | `a98c0895c0c0340326f79d7838ddc37ba86cfa2b` |
-| LogicDesign | `../LogicDesign` | `09768ed203d97d1d0f79f786f9988fcb2cd39155` |
+| CircuiteFoundation | `https://github.com/1amageek/CircuiteFoundation.git` | `7abcac83517935c9b9f7553d7016d62cffde259d` |
+| PDKKit | `https://github.com/1amageek/PDKKit.git` | `b62c5ad7e5819a24977038c2133856caed52f481` |
+| ToolQualification | `https://github.com/1amageek/ToolQualification.git` | `d572d950a9dccb699413cd5157d901812354444f` |
+| DesignFlowKernel | `https://github.com/1amageek/DesignFlowKernel.git` | `6bbe1a24bc7e0a983da747844d8b2db1c80fefd4` |
+| PhysicalDesignEngine | `https://github.com/1amageek/PhysicalDesignEngine.git` | `a2b64a3f9f1651be0601496a7423a211c1438c49` |
+| LogicDesign | `https://github.com/1amageek/LogicDesign.git` | `b9aa25b0b78e6168befa25df3bfe8309bd020a6d` |
 
-Use the workspace verifier or an Xcode package scheme with a timeout. Tests cover human/agent approval separation, trust recomputation, bundle integrity, and complete axis coverage.
+Build and test with an Xcode package scheme and a timeout. Tests cover human/agent approval separation, trust recomputation, bundle integrity, immutable persistence, path containment, and complete axis coverage.

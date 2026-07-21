@@ -126,6 +126,71 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
                 recordBlocked = true
                 add("TOOL_IDENTITY_REQUIRED", "Evidence must identify the producing tool and exact version.", axis: axis, entity: record.evidenceID)
             }
+            let executionIdentities = [record.executionProvenance.producer]
+                + record.executionProvenance.supportingTools
+            if !executionIdentities.contains(where: {
+                matchesQualifiedImplementation(
+                    $0,
+                    implementationID: record.toolID,
+                    version: record.toolVersion,
+                    binaryDigest: record.toolBinaryDigest
+                )
+            }) {
+                recordBlocked = true
+                add(
+                    "OPERATIONAL_EXECUTION_IDENTITY_MISMATCH",
+                    "Execution provenance must bind the exact qualified implementation identifier, version, and executable digest.",
+                    axis: axis,
+                    entity: record.evidenceID
+                )
+            }
+            if record.artifact.producer.map({ executionIdentities.contains($0) }) != true {
+                recordBlocked = true
+                add(
+                    "OPERATIONAL_ARTIFACT_PROVENANCE_MISMATCH",
+                    "The operational result artifact producer must be retained by its execution provenance.",
+                    axis: axis,
+                    entity: record.evidenceID
+                )
+            }
+            if Set(record.executionProvenance.inputs) != Set(record.inputArtifacts) {
+                recordBlocked = true
+                add(
+                    "OPERATIONAL_EXECUTION_INPUT_MISMATCH",
+                    "Execution provenance inputs must exactly match the immutable operational inputs declared by the signoff evidence.",
+                    axis: axis,
+                    entity: record.evidenceID
+                )
+            }
+            if record.executionProvenance.completedAt > evaluatedAt {
+                recordBlocked = true
+                add(
+                    "OPERATIONAL_EXECUTION_TIMESTAMP_INVALID",
+                    "Operational evidence cannot complete after the signoff evaluation time.",
+                    axis: axis,
+                    entity: record.evidenceID
+                )
+            }
+            if record.disposition == .blocked {
+                recordBlocked = true
+                add(
+                    "EVIDENCE_REPORTED_BLOCKED",
+                    "The producing analysis explicitly reported that this signoff evidence is blocked.",
+                    axis: axis,
+                    entity: record.evidenceID
+                )
+            }
+            let dispositionReason = record.reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if record.disposition != .passed,
+               dispositionReason == nil || dispositionReason == "" {
+                recordBlocked = true
+                add(
+                    "EVIDENCE_DISPOSITION_REASON_REQUIRED",
+                    "Failed or blocked signoff evidence must retain a non-empty reason.",
+                    axis: axis,
+                    entity: record.evidenceID
+                )
+            }
             let qualification = record.processQualification
             if requirement.minimumQualificationLevel == .productionEligible,
                !qualification.isQualified(at: evaluatedAt, requirePDKScope: true) {
@@ -146,6 +211,20 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
                 add(
                     "PROCESS_QUALIFICATION_SCOPE_MISMATCH",
                     "Qualification must bind the exact tool binary/version, process, PDK, deck, and independent oracle scope.",
+                    axis: axis,
+                    entity: record.evidenceID
+                )
+            }
+            if qualification.identityArtifacts.toolExecutable.producer?.kind != .tool
+                || qualification.identityArtifacts.toolExecutable.producer?.identifier != record.toolID
+                || qualification.identityArtifacts.toolExecutable.producer?.version != record.toolVersion
+                || qualification.identityArtifacts.toolExecutable.digest.hexadecimalValue.caseInsensitiveCompare(
+                    record.toolBinaryDigest
+                ) != .orderedSame {
+                recordBlocked = true
+                add(
+                    "QUALIFIED_TOOL_BINARY_MISMATCH",
+                    "Operational evidence must bind the exact executable artifact qualified for the producer tool and version.",
                     axis: axis,
                     entity: record.evidenceID
                 )
@@ -219,16 +298,6 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
                     )
                 }
             }
-            if !qualification.outputArtifacts.contains(record.artifact) {
-                recordBlocked = true
-                add(
-                    "QUALIFICATION_OUTPUT_SCOPE_MISMATCH",
-                    "The signoff output is not retained by the process qualification record.",
-                    axis: axis,
-                    entity: record.evidenceID
-                )
-            }
-
             if recordBlocked {
                 blockedIDs.append(record.evidenceID)
             } else {
@@ -251,6 +320,17 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
                 || (byte >= 65 && byte <= 70)
                 || (byte >= 97 && byte <= 102)
         }
+    }
+
+    private func matchesQualifiedImplementation(
+        _ producer: ProducerIdentity,
+        implementationID: String,
+        version: String,
+        binaryDigest: String
+    ) -> Bool {
+        producer.version == version
+            && producer.identifier == implementationID
+            && producer.build?.caseInsensitiveCompare(binaryDigest) == .orderedSame
     }
 
     private func suggestedActions(for code: String) -> [String] {

@@ -4,7 +4,7 @@ import CircuiteFoundation
 import ReleaseCore
 
 public struct SignoffRequest: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 3
 
     public var schemaVersion: Int
     public var runID: String
@@ -20,8 +20,7 @@ public struct SignoffRequest: Sendable, Hashable, Codable {
     public var waivers: [SignoffWaiver]
     public var projectRoot: String?
     public var finalLayoutDigest: String?
-    public var bundleArtifact: ArtifactReference?
-    public var bundleIssuedAt: Date?
+    public var bundleOutput: ArtifactLocator
 
     public init(
         runID: String,
@@ -36,8 +35,7 @@ public struct SignoffRequest: Sendable, Hashable, Codable {
         waivers: [SignoffWaiver] = [],
         projectRoot: String? = nil,
         finalLayoutDigest: String? = nil,
-        bundleArtifact: ArtifactReference? = nil,
-        bundleIssuedAt: Date? = nil
+        bundleOutput: ArtifactLocator
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.runID = runID
@@ -52,7 +50,6 @@ public struct SignoffRequest: Sendable, Hashable, Codable {
         self.waivers = waivers
         self.projectRoot = projectRoot
         self.finalLayoutDigest = finalLayoutDigest
-        self.bundleArtifact = bundleArtifact
-        self.bundleIssuedAt = bundleIssuedAt
+        self.bundleOutput = bundleOutput
     }
 }

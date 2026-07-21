@@ -10,18 +10,20 @@ Permit tapeout only when an immutable design has complete, applicable evidence a
 |---|---|---:|
 | Signoff profile | Define required axes and evidence-acceptance rules for digital, analog and mixed-signal designs. | P0 |
 | Applicability resolution | Represent passed, failed, blocked and profile-approved not-applicable states. | P0 |
-| Evidence validation | Verify artifact integrity, design/PDK/tool digests and cross-axis revision consistency. | P0 |
+| Evidence validation | Verify artifact integrity, operational execution provenance, exact design/PDK/tool identity, completion time and cross-axis revision consistency. | P0 |
 | Waiver governance | Persist scoped waivers, authority, rationale, expiry and affected evidence. | P0 |
-| Signoff bundle | Produce an immutable, machine-verifiable technical-pass or blocked evidence packet. | P0 |
-| Stream-out validation | Validate top cell, units, layer map, hierarchy and GDS/OASIS generation. | P1 |
-| XOR and release checks | Compare source and streamed layout and verify seal, pad and release requirements. | P1 |
-| Foundry handoff | Package checksums, manifests, evidence, waivers and final layout artifacts. | P1 |
+| Signoff bundle | Generate, immutably persist and reload a canonical technical-pass packet containing exact evidence artifacts and production qualification scopes. | P0 |
+| Stream-out generation | Generate and immutably persist GDSII/OASIS bytes, then validate top cell, units, layer map and hierarchy. | P0 |
+| Qualified geometric XOR | Run an independently qualified geometric comparator over source and streamed standard layouts; retain exact invocation provenance, difference count/area, and raw report digest. Any difference, unqualified scope, timeout, cancellation, launch/exit failure, malformed report, or artifact-integrity failure blocks or fails tapeout. | P0 |
+| Foundry handoff | Generate canonical checksums and manifests, persist immutably, reload, and verify exact bytes. | P0 |
 
 ## Required outcomes
 
 - No required axis can be silently omitted.
 - Tapeout accepts only a completed, verified SignoffBundle bound to the same final layout.
 - Release artifacts are independently reproducible and auditable.
+- Release authorization accepts only production qualification requests whose exact scopes equal the producer scopes retained by the signoff bundle.
+- Digital and mixed-signal release profiles require logic equivalence, RTL lint, CDC, RDC, formal proof, scan, ATPG, BIST and power-intent evidence.
 
 ## Common platform requirements
 

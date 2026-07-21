@@ -18,8 +18,8 @@ public struct SignoffAxisResult: Sendable, Hashable, Codable {
     ) {
         self.axis = axis
         self.disposition = disposition
-        self.evidenceIDs = evidenceIDs
-        self.diagnosticCodes = diagnosticCodes
+        self.evidenceIDs = evidenceIDs.sorted()
+        self.diagnosticCodes = diagnosticCodes.sorted()
         self.reason = reason
         self.waiverID = waiverID
     }

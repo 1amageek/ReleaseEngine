@@ -32,10 +32,10 @@ public struct SignoffWaiver: Sendable, Hashable, Codable {
         self.authority = authority
         self.approvedAt = approvedAt
         self.expiresAt = expiresAt
-        self.affectedEvidenceIDs = affectedEvidenceIDs
-        self.designDigest = designDigest
-        self.pdkDigest = pdkDigest
+        self.affectedEvidenceIDs = affectedEvidenceIDs.sorted()
+        self.designDigest = designDigest.lowercased()
+        self.pdkDigest = pdkDigest.lowercased()
         self.toolID = toolID
-        self.toolDigest = toolDigest
+        self.toolDigest = toolDigest?.lowercased()
     }
 }

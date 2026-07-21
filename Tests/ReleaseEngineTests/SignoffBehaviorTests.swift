@@ -8,14 +8,36 @@ import ToolQualification
 
 @Suite("Signoff behavior")
 struct SignoffBehaviorTests {
-    @Test("built-in profiles require every production axis")
+    @Test("digital and mixed-signal profiles require every production axis")
     func builtInProfiles() {
         let provider = DefaultSignoffProfileProvider()
-        for profileID in ["digital", "analog", "mixed-signal"] {
+        for profileID in ["digital", "mixed-signal"] {
             let profile = provider.profile(profileID: profileID)
             #expect(profile?.requirements.count == ReleaseSignoffAxis.allCases.count)
             #expect(profile?.requirements.allSatisfy { $0.required && $0.minimumQualificationLevel == .productionEligible } == true)
         }
+        let analog = provider.profile(profileID: "analog")
+        #expect(analog?.requirements.count == ReleaseSignoffAxis.allCases.count)
+        #expect(analog?.requirement(for: .rtlLint)?.required == false)
+        #expect(analog?.requirement(for: .powerIntent)?.required == true)
+    }
+
+    @Test("production profiles include logic, RTL verification, DFT, and power intent axes")
+    func productionDigitalAxes() {
+        let required: Set<ReleaseSignoffAxis> = [
+            .logicSynthesisEquivalence,
+            .rtlLint,
+            .clockDomainCrossing,
+            .resetDomainCrossing,
+            .formalProof,
+            .scanInsertion,
+            .automaticTestPatternGeneration,
+            .builtInSelfTest,
+            .powerIntent,
+        ]
+        let profile = DefaultSignoffProfileProvider.digitalProfile
+
+        #expect(required.isSubset(of: Set(profile.requirements.filter(\.required).map(\.axis))))
     }
 
     @Test("missing typed evidence blocks signoff")
@@ -26,7 +48,13 @@ struct SignoffBehaviorTests {
             profileID: "digital",
             designDigest: String(repeating: "1", count: 64),
             pdkDigest: String(repeating: "2", count: 64),
-            evidence: []
+            evidence: [],
+            bundleOutput: ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: "release/missing.json"),
+                role: .output,
+                kind: .release,
+                format: .json
+            )
         )
         let result = try await DefaultSignoffEvaluator().execute(request)
         #expect(result.status == .blocked)
@@ -50,7 +78,13 @@ struct SignoffBehaviorTests {
                 producerVersion: "1"
             ),
             pdkDigest: String(repeating: "2", count: 64),
-            evidence: []
+            evidence: [],
+            bundleOutput: ArtifactLocator(
+                location: try ArtifactLocation(workspaceRelativePath: "release/lineage.json"),
+                role: .output,
+                kind: .release,
+                format: .json
+            )
         )
         let result = try await DefaultSignoffEvaluator().execute(request)
         #expect(result.status == .blocked)
@@ -68,6 +102,47 @@ struct SignoffBehaviorTests {
         #expect(result.payload.bundle == fixture.bundleReference)
         #expect(result.payload.axisResults.count == ReleaseSignoffAxis.allCases.count)
         #expect(result.payload.axisResults.allSatisfy { $0.disposition == .passed })
+    }
+
+    @Test("typed evidence inventory must exactly match declared evidence")
+    func evidenceInventoryMismatchBlocks() async throws {
+        let fixture = try await SignoffFixture()
+        defer { removeReleaseFixture(fixture.root) }
+
+        let result = try await fixture.evaluate(evidence: Array(fixture.records.dropLast()).map(\.artifact))
+
+        #expect(result.status == .blocked)
+        #expect(result.diagnostics.contains { $0.code.rawValue == "SIGNOFF_EVIDENCE_BINDING_MISMATCH" })
+    }
+
+    @Test("all qualification artifacts must be bound as signoff inputs")
+    func missingQualificationInputBlocks() async throws {
+        let fixture = try await SignoffFixture()
+        defer { removeReleaseFixture(fixture.root) }
+        let allInputs = fixture.boundInputs(for: fixture.records)
+        let qualificationArtifact = try #require(
+            fixture.records.first?.processQualification.identityArtifacts.toolExecutable
+        )
+
+        let result = try await fixture.evaluate(
+            inputs: allInputs.filter { $0 != qualificationArtifact }
+        )
+
+        #expect(result.status == .blocked)
+        #expect(result.diagnostics.contains { $0.code.rawValue == "SIGNOFF_INPUT_BINDING_MISSING" })
+    }
+
+    @Test("a generated signoff bundle target is immutable")
+    func generatedBundleIsImmutable() async throws {
+        let fixture = try await SignoffFixture()
+        defer { removeReleaseFixture(fixture.root) }
+
+        let first = try await fixture.evaluate()
+        let second = try await fixture.evaluate()
+
+        #expect(first.status == .completed)
+        #expect(second.status == .blocked)
+        #expect(second.diagnostics.contains { $0.code.rawValue == "SIGNOFF_BUNDLE_PERSISTENCE_BLOCKED" })
     }
 
     @Test("expired waiver cannot convert a failed axis")
@@ -90,6 +165,58 @@ struct SignoffBehaviorTests {
         #expect(result.status == .blocked)
         #expect(!result.payload.passed)
         #expect(result.diagnostics.contains { $0.code.rawValue == "WAIVER_EXPIRED_OR_INVALID" })
+    }
+
+    @Test("a valid scoped waiver is retained in the generated bundle")
+    func validScopedWaiverCompletes() async throws {
+        let fixture = try await SignoffFixture(failedAxis: .simulation)
+        defer { removeReleaseFixture(fixture.root) }
+        let waiver = SignoffWaiver(
+            waiverID: "simulation-waiver",
+            axis: .simulation,
+            reason: "approved scoped exception",
+            authority: "review-board",
+            approvedAt: Date(timeIntervalSince1970: 500),
+            expiresAt: Date(timeIntervalSince1970: 2_000),
+            affectedEvidenceIDs: ["evidence-simulation"],
+            designDigest: fixture.designDigest,
+            pdkDigest: fixture.pdkDigest
+        )
+
+        let result = try await fixture.evaluate(waivers: [waiver])
+
+        #expect(result.status == .completed)
+        #expect(result.payload.bundle != nil)
+        #expect(result.payload.axisResults.contains {
+            $0.axis == .simulation
+                && $0.disposition == .waived
+                && $0.waiverID == waiver.waiverID
+        })
+    }
+
+    @Test("duplicate waiver axes fail closed")
+    func duplicateWaiverAxisBlocks() async throws {
+        let fixture = try await SignoffFixture(failedAxis: .simulation)
+        defer { removeReleaseFixture(fixture.root) }
+        let approvedAt = Date(timeIntervalSince1970: 500)
+        let waivers = ["first", "second"].map {
+            SignoffWaiver(
+                waiverID: $0,
+                axis: .simulation,
+                reason: "scoped exception",
+                authority: "review-board",
+                approvedAt: approvedAt,
+                expiresAt: Date(timeIntervalSince1970: 2_000),
+                affectedEvidenceIDs: ["evidence-simulation"],
+                designDigest: fixture.designDigest,
+                pdkDigest: fixture.pdkDigest
+            )
+        }
+
+        let result = try await fixture.evaluate(waivers: waivers)
+
+        #expect(result.status == .blocked)
+        #expect(result.diagnostics.contains { $0.code.rawValue == "DUPLICATE_WAIVER_AXIS" })
     }
 
     @Test("unknown signoff profiles fail closed")
@@ -173,6 +300,126 @@ struct SignoffBehaviorTests {
         #expect(result.diagnostics.contains { $0.code.rawValue == "TOOL_IDENTITY_REQUIRED" })
     }
 
+    @Test("operational provenance must bind the qualified implementation")
+    func operationalProvenanceIdentityMismatchBlocks() async throws {
+        let fixture = try await SignoffFixture()
+        defer { removeReleaseFixture(fixture.root) }
+        var records = fixture.records
+        let original = records[0].executionProvenance
+        records[0].executionProvenance = try ExecutionProvenance(
+            producer: ProducerIdentity(
+                kind: .engine,
+                identifier: "unqualified-engine",
+                version: "1.0.0"
+            ),
+            inputs: original.inputs,
+            startedAt: original.startedAt,
+            completedAt: original.completedAt
+        )
+
+        let result = try await fixture.evaluate(records: records)
+
+        #expect(result.status == .blocked)
+        #expect(result.diagnostics.contains {
+            $0.code.rawValue == "OPERATIONAL_EXECUTION_IDENTITY_MISMATCH"
+        })
+    }
+
+    @Test("operational provenance cannot claim future completion")
+    func futureOperationalCompletionBlocks() async throws {
+        let fixture = try await SignoffFixture()
+        defer { removeReleaseFixture(fixture.root) }
+        var records = fixture.records
+        let original = records[0].executionProvenance
+        records[0].executionProvenance = try ExecutionProvenance(
+            producer: original.producer,
+            supportingTools: original.supportingTools,
+            inputs: original.inputs,
+            startedAt: fixture.evaluatedAt,
+            completedAt: fixture.evaluatedAt.addingTimeInterval(1)
+        )
+
+        let result = try await fixture.evaluate(records: records)
+
+        #expect(result.status == .blocked)
+        #expect(result.diagnostics.contains {
+            $0.code.rawValue == "OPERATIONAL_EXECUTION_TIMESTAMP_INVALID"
+        })
+    }
+
+    @Test("operational provenance cannot omit a declared input")
+    func missingOperationalProvenanceInputBlocks() async throws {
+        let fixture = try await SignoffFixture()
+        defer { removeReleaseFixture(fixture.root) }
+        var records = fixture.records
+        let original = records[0].executionProvenance
+        records[0].executionProvenance = try ExecutionProvenance(
+            producer: original.producer,
+            supportingTools: original.supportingTools,
+            inputs: Array(original.inputs.dropLast()),
+            invocation: original.invocation,
+            startedAt: original.startedAt,
+            completedAt: original.completedAt
+        )
+
+        let result = try await fixture.evaluate(records: records)
+
+        #expect(result.status == .blocked)
+        #expect(result.diagnostics.contains {
+            $0.code.rawValue == "OPERATIONAL_EXECUTION_INPUT_MISMATCH"
+        })
+    }
+
+    @Test("operational provenance cannot add an undeclared input")
+    func extraOperationalProvenanceInputBlocks() async throws {
+        let fixture = try await SignoffFixture()
+        defer { removeReleaseFixture(fixture.root) }
+        var records = fixture.records
+        let original = records[0].executionProvenance
+        let undeclared = records[0].processQualification.identityArtifacts.toolExecutable
+        records[0].executionProvenance = try ExecutionProvenance(
+            producer: original.producer,
+            supportingTools: original.supportingTools,
+            inputs: original.inputs + [undeclared],
+            invocation: original.invocation,
+            startedAt: original.startedAt,
+            completedAt: original.completedAt
+        )
+
+        let result = try await fixture.evaluate(records: records)
+
+        #expect(result.status == .blocked)
+        #expect(result.diagnostics.contains {
+            $0.code.rawValue == "OPERATIONAL_EXECUTION_INPUT_MISMATCH"
+        })
+    }
+
+    @Test("operational artifact producer cannot be substituted")
+    func operationalArtifactProducerSubstitutionBlocks() async throws {
+        let fixture = try await SignoffFixture()
+        defer { removeReleaseFixture(fixture.root) }
+        var records = fixture.records
+        let artifact = records[0].artifact
+        records[0].artifact = ArtifactReference(
+            id: artifact.id,
+            locator: artifact.locator,
+            digest: artifact.digest,
+            byteCount: artifact.byteCount,
+            producer: try ProducerIdentity(
+                kind: .tool,
+                identifier: "substituted-signoff-tool",
+                version: "1.0.0"
+            )
+        )
+
+        let result = try await fixture.evaluate(records: records)
+
+        #expect(result.status == .blocked)
+        #expect(result.diagnostics.contains {
+            $0.code.rawValue == "OPERATIONAL_ARTIFACT_PROVENANCE_MISMATCH"
+        })
+    }
+
     @Test("signoff evidence retains immutable design and PDK inputs")
     func incompleteInputBindingBlocks() async throws {
         let fixture = try await SignoffFixture()
@@ -207,6 +454,20 @@ struct SignoffBehaviorTests {
         #expect(!result.payload.passed)
     }
 
+    @Test("an explicitly blocked producer result blocks its release axis")
+    func blockedEvidenceCannotPassSignoff() async throws {
+        let fixture = try await SignoffFixture()
+        defer { removeReleaseFixture(fixture.root) }
+        var records = fixture.records
+        records[0].disposition = .blocked
+        records[0].reason = "required analysis did not complete"
+
+        let result = try await fixture.evaluate(records: records)
+
+        #expect(result.status == .blocked)
+        #expect(result.diagnostics.contains { $0.code.rawValue == "EVIDENCE_REPORTED_BLOCKED" })
+    }
+
     @Test("artifact bytes cannot change after evidence is referenced")
     func tamperedEvidenceArtifactBlocks() async throws {
         let fixture = try await SignoffFixture()
@@ -227,7 +488,6 @@ struct SignoffBehaviorTests {
 private struct SignoffFixture {
     let root: URL
     let evaluatedAt = Date(timeIntervalSince1970: 1_000)
-    let issuedAt = Date(timeIntervalSince1970: 999)
     let designArtifact: ArtifactReference
     let pdkArtifact: ArtifactReference
     let designDigest: String
@@ -250,6 +510,12 @@ private struct SignoffFixture {
         let oracleProducer = try ProducerIdentity(kind: .tool, identifier: "signoff-oracle", version: "2.0.0")
         let issuer = try ProducerIdentity(kind: .engine, identifier: "qualification-engine", version: "1.0.0")
         let tool = try Self.write("tool", path: "identity/tool", kind: .other, role: .input, root: root, producer: toolProducer)
+        let operationalToolProducer = try ProducerIdentity(
+            kind: .tool,
+            identifier: "signoff-tool",
+            version: "1.0.0",
+            build: tool.digest.hexadecimalValue
+        )
         let process = try Self.write("process", path: "identity/process.json", kind: .technology, role: .input, root: root)
         let pdk = pdkArtifact
         let deck = try Self.write("deck", path: "identity/deck.json", kind: .ruleDeck, role: .input, root: root)
@@ -278,7 +544,7 @@ private struct SignoffFixture {
                 kind: .report,
                 role: .output,
                 root: root,
-                producer: toolProducer
+                producer: operationalToolProducer
             ))
         }
         let oracleOutput = try Self.write("oracle-output", path: "reports/oracle.json", kind: .report, role: .output, root: root, producer: oracleProducer)
@@ -320,7 +586,11 @@ private struct SignoffFixture {
                 caseID: "signoff-corpus",
                 primary: caseOutcome,
                 oracle: caseOutcome,
-                agreementComparisons: [ToolQualificationMetricComparison(metricID: "agreement", observed: 0, expected: 0)]
+                agreementComparisons: [ToolOracleMetricComparison(
+                    metricID: "failure-count",
+                    primaryObserved: 0,
+                    oracleObserved: 0
+                )]
             )],
             checkedAt: evaluatedAt
         )
@@ -386,6 +656,12 @@ private struct SignoffFixture {
                 toolVersion: "1.0.0",
                 toolBinaryDigest: tool.digest.hexadecimalValue,
                 inputArtifacts: [designArtifact, pdkArtifact],
+                executionProvenance: try ExecutionProvenance(
+                    producer: operationalToolProducer,
+                    inputs: [designArtifact, pdkArtifact],
+                    startedAt: evaluatedAt.addingTimeInterval(-2),
+                    completedAt: evaluatedAt.addingTimeInterval(-1)
+                ),
                 processQualification: qualification,
                 disposition: axis == failedAxis ? .failed : .passed,
                 reason: axis == failedAxis ? "failure" : nil
@@ -411,15 +687,29 @@ private struct SignoffFixture {
             finalLayoutDigest: String(repeating: "5", count: 64),
             axisResults: axisResults,
             waivers: [],
+            evidenceRecords: generatedRecords,
+            evidenceArtifacts: generatedRecords.map(\.artifact),
+            toolQualificationScopes: [qualification.scope],
             evidenceDigest: evidenceDigest,
-            issuedAt: issuedAt
+            issuedAt: evaluatedAt
         )
-        let bundleArtifact = try Self.write(
-            try bundle.canonicalData(),
-            path: "release/signoff.json",
-            kind: .release,
+        let bundleBytes = try bundle.canonicalData()
+        let bundleLocator = ArtifactLocator(
+            location: try ArtifactLocation(workspaceRelativePath: "release/signoff.json"),
             role: .output,
-            root: root
+            kind: .release,
+            format: .json
+        )
+        let bundleArtifact = ArtifactReference(
+            locator: bundleLocator,
+            digest: try SHA256ContentDigester().digest(data: bundleBytes),
+            byteCount: UInt64(bundleBytes.count),
+            producer: try ProducerIdentity(
+                kind: .engine,
+                identifier: "native.release.signoff",
+                version: "2.0.0",
+                build: ReleaseRuntimeIdentity.currentExecutableDigest()
+            )
         )
         bundleReference = SignoffBundleReference(
             artifact: bundleArtifact,
@@ -432,6 +722,8 @@ private struct SignoffFixture {
     func evaluate(
         waivers: [SignoffWaiver] = [],
         records suppliedRecords: [ReleaseSignoffEvidenceReference]? = nil,
+        evidence suppliedEvidence: [ArtifactReference]? = nil,
+        inputs suppliedInputs: [ArtifactReference]? = nil,
         profileID: String = "digital",
         designKind: ReleaseDesignKind = .digital,
         includeProjectRoot: Bool = true
@@ -439,18 +731,33 @@ private struct SignoffFixture {
         let evaluatedRecords = suppliedRecords ?? records
         return try await DefaultSignoffEvaluator(now: { evaluatedAt }).execute(SignoffRequest(
             runID: "signoff",
-            inputs: [designArtifact, pdkArtifact, bundleReference.artifact],
+            inputs: suppliedInputs ?? boundInputs(for: evaluatedRecords),
             profileID: profileID,
             designDigest: designDigest,
             pdkDigest: pdkDigest,
-            evidence: evaluatedRecords.map(\.artifact),
+            evidence: suppliedEvidence ?? evaluatedRecords.map(\.artifact),
             designKind: designKind,
             evidenceRecords: evaluatedRecords,
             waivers: waivers,
             projectRoot: includeProjectRoot ? root.path : nil,
             finalLayoutDigest: bundleReference.finalLayoutDigest,
-            bundleArtifact: bundleReference.artifact,
-            bundleIssuedAt: issuedAt
+            bundleOutput: bundleReference.artifact.locator
+        ))
+    }
+
+    func boundInputs(
+        for records: [ReleaseSignoffEvidenceReference]
+    ) -> [ArtifactReference] {
+        Array(Set(
+            [designArtifact, pdkArtifact]
+                + records.flatMap(\.inputArtifacts)
+                + records.flatMap { record in
+                    let qualification = record.processQualification
+                    return qualification.identityArtifacts.all
+                        + qualification.evidenceArtifacts
+                        + qualification.inputArtifacts
+                        + qualification.outputArtifacts
+                }
         ))
     }
 
