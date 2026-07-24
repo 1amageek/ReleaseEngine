@@ -21,7 +21,7 @@ release-engine signoff --request <path|->
 release-engine tapeout --request <path|->
 ```
 
-Exit code `0` means the requested operation completed, `2` means a typed blocked result, and `1` means the request could not be decoded or executed.
+Exit code `0` means the requested operation completed, `2` means a typed blocked result, `3` means a typed failed result, and `4` means cancellation. Invalid commands, malformed arguments, and requests that cannot be decoded or executed exit with `1`.
 
 ## Release trust boundary
 
@@ -41,7 +41,7 @@ is absent or malformed.
 
 Signoff and tapeout artifact persistence are protocol-first. `ReleaseArtifactPersisting` creates an immutable artifact and reloads its bytes after the write. `LocalReleaseArtifactStore` provides standalone project-relative storage; Xcircuite can make its workspace store conform directly to the same protocol to add ledger transactions.
 
-Production tapeout requires `QualifiedGeometricXORExecutor`. Its configuration binds an externally qualified executable and a project-relative JSON report artifact. The executor accepts only GDSII/OASIS layouts, invokes the executable directly, persists the raw canonical report immutably, and records execution provenance plus difference count and area. The foundry handoff retains the complete XOR qualification artifact graph, not only the raw comparison report. `DefaultLayoutXORComparator` is intentionally diagnostic-only: equal file bytes do not prove qualified geometric equivalence and never authorize tapeout.
+Production tapeout requires `QualifiedGeometricXORExecutor`. Its configuration binds an externally qualified executable and a project-relative JSON report artifact. The executor accepts only GDSII/OASIS layouts, copies verified executable and layout bytes into a private read-only execution workspace, invokes only those snapshots, and verifies them again after the process exits. It then persists the raw canonical report immutably and records execution provenance plus difference count and area. The foundry handoff retains the complete XOR qualification artifact graph, not only the raw comparison report. `DefaultLayoutXORComparator` is intentionally diagnostic-only: equal file bytes do not prove qualified geometric equivalence and never authorize tapeout.
 
 ## Build and integration
 
@@ -58,5 +58,6 @@ standalone resolution:
 | DesignFlowKernel | `https://github.com/1amageek/DesignFlowKernel.git` | `6bbe1a24bc7e0a983da747844d8b2db1c80fefd4` |
 | PhysicalDesignEngine | `https://github.com/1amageek/PhysicalDesignEngine.git` | `a2b64a3f9f1651be0601496a7423a211c1438c49` |
 | LogicDesign | `https://github.com/1amageek/LogicDesign.git` | `b9aa25b0b78e6168befa25df3bfe8309bd020a6d` |
+| SignoffToolSupport | `https://github.com/1amageek/SignoffToolSupport.git` | `6bf675eecb27e3bd3440c5ce8a85c85c510fc3cb` |
 
 Build and test with an Xcode package scheme and a timeout. Tests cover human/agent approval separation, trust recomputation, bundle integrity, immutable persistence, path containment, and complete axis coverage.
