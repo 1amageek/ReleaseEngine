@@ -19,7 +19,6 @@ Tool qualification is not performed by this package. ToolQualification owns trus
 release-engine profile --profile <digital|analog|mixed-signal>
 release-engine signoff --request <path|->
 release-engine tapeout --request <path|->
-release-engine authorize --request <path|-> --project-root <path>
 ```
 
 Exit code `0` means the requested operation completed, `2` means a typed blocked result, and `1` means the request could not be decoded or executed.
@@ -33,7 +32,7 @@ ToolQualification inputs ─┘          │
                                      └─ re-reads raw retained artifacts
 ```
 
-Authorization requires exact unique coverage of all release axes, including logic equivalence, RTL verification, DFT, and power intent, an approval bound to the exact bundle artifact, and one reproducible production-eligible trust decision for every qualified producer scope retained by the bundle. PEX, STA, and electrical evidence must name their requested operating corners, and every corner must be covered by both corpus and independent-oracle qualification evidence. No result or bundle can approve itself.
+Authorization requires exact unique coverage of all release axes, including logic equivalence, RTL verification, DFT, and power intent, plus one reproducible production-eligible trust decision for every qualified producer scope retained by the bundle. Approval is authenticated against an attested canonical run ledger supplied by the owning persistence system: the retained human action and approval artifact must bind an immutable reviewed stage-result snapshot that contains the exact bundle. PEX, STA, and electrical evidence must name their requested operating corners, and every corner must be covered by both corpus and independent-oracle qualification evidence. No result, request, or bundle can approve itself. The standalone CLI does not expose authorization because it does not own the canonical run ledger; hosts inject `ReleaseApprovalLedgerReading` into `AttestedReleaseApprovalAuthenticator`.
 
 Release-native results and artifacts retain the executing binary SHA-256,
 semantic implementation version, invocation, and environment fingerprint.

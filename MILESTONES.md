@@ -43,10 +43,10 @@ Status: complete.
 
 Status: complete.
 
-- `ReleaseAuthorizationRequest` binds a human `FlowApprovalRecord` to the exact run, release stage, and canonical signoff bundle artifact.
+- `ReleaseAuthorizationRequest` carries a human `FlowApprovalRecord`; authorization authenticates its canonical ledger action and reviewed stage-result snapshot against the exact run and signoff bundle artifact.
 - Authorization requires exact unique coverage of every release axis, including logic, RTL verification, DFT, and power intent, and independently reproducible eligible trust for every required tool.
 - Rejected, non-human, stale, mismatched, incomplete, duplicated, or self-referential input remains blocked with typed diagnostics.
-- `release-engine authorize` emits `.authorized` only when every technical, trust, integrity, and approval condition passes.
+- Host-integrated authorization emits `.authorized` only when every technical, trust, integrity, and approval condition passes and the owning persistence system supplies an attested ledger.
 
 ## M5 — Xcircuite and DesignFlowKernel composition
 

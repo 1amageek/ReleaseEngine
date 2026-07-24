@@ -245,6 +245,68 @@ struct TapeoutBehaviorTests {
         #expect(result.diagnostics.contains { $0.code.rawValue == "HANDOFF_PROJECT_ROOT_REQUIRED" })
     }
 
+    @Test("geometric XOR rejects input mutation during execution")
+    func geometricXORRejectsInputMutation() async throws {
+        let fixture = try TapeoutFixture()
+        defer { fixture.remove() }
+        let qualification = try await ProductionTrustFixture(
+            root: fixture.root,
+            evaluatedAt: fixture.generatedAt,
+            toolID: "qualified-layout-xor"
+        )
+        let source = fixture.request.physicalDesign.layoutArtifact
+        let result = await QualifiedGeometricXORExecutor(
+            configuration: try fixture.geometricXORConfiguration(
+                qualification: qualification.processQualification
+            ),
+            artifactPersister: fixture.store,
+            processRunner: InputMutatingProcessRunner(),
+            now: { fixture.generatedAt }
+        ).compare(
+            source: source,
+            streamed: source,
+            pdkDigest: fixture.request.pdk.digest,
+            projectRoot: fixture.root
+        )
+
+        #expect(result.status == .blocked)
+        #expect(result.executionStatus == .invalidReport)
+        #expect(result.message.contains("changed during execution"))
+        #expect(result.evidenceArtifact == nil)
+    }
+
+    @Test("geometric XOR executes private snapshots instead of caller-owned layouts")
+    func geometricXORUsesPrivateInputSnapshots() async throws {
+        let fixture = try TapeoutFixture()
+        defer { fixture.remove() }
+        let qualification = try await ProductionTrustFixture(
+            root: fixture.root,
+            evaluatedAt: fixture.generatedAt,
+            toolID: "qualified-layout-xor"
+        )
+        let source = fixture.request.physicalDesign.layoutArtifact
+        let originalURL = try source.locator.location.resolvedFileURL(
+            relativeTo: fixture.root
+        )
+        let result = await QualifiedGeometricXORExecutor(
+            configuration: try fixture.geometricXORConfiguration(
+                qualification: qualification.processQualification
+            ),
+            artifactPersister: fixture.store,
+            processRunner: SnapshotPathAssertingProcessRunner(originalURL: originalURL),
+            now: { fixture.generatedAt }
+        ).compare(
+            source: source,
+            streamed: source,
+            pdkDigest: fixture.request.pdk.digest,
+            projectRoot: fixture.root
+        )
+
+        #expect(result.status == .passed)
+        #expect(result.executionStatus == .completed)
+        #expect(LocalArtifactVerifier().verify(source, relativeTo: fixture.root).isVerified)
+    }
+
     @Test("immutable artifact persistence serializes concurrent stream writers")
     func concurrentImmutableStreamTarget() async throws {
         let fixture = try TapeoutFixture()
@@ -746,6 +808,62 @@ private struct DifferenceReportingProcessRunner: TimedProcessRunning {
             differenceAreaSquareMicrometers: 0.5
         )
         try report.canonicalData().write(
+            to: URL(fileURLWithPath: arguments[reportIndex + 1]),
+            options: .atomic
+        )
+        return TimedProcessResult(exitCode: 0, standardOutput: "", standardError: "")
+    }
+}
+
+private struct InputMutatingProcessRunner: TimedProcessRunning {
+    func run(
+        process: Process,
+        cancellationCheck: (@Sendable () async throws -> Bool)?
+    ) async throws -> TimedProcessResult {
+        let arguments = process.arguments ?? []
+        guard let sourceIndex = arguments.firstIndex(of: "--source-layout"),
+              arguments.indices.contains(sourceIndex + 1),
+              let reportIndex = arguments.firstIndex(of: "--report"),
+              arguments.indices.contains(reportIndex + 1) else {
+            throw TimedProcessError.invalidConfiguration("XOR paths are required")
+        }
+        try Data("mutated-layout".utf8).write(
+            to: URL(fileURLWithPath: arguments[sourceIndex + 1]),
+            options: .atomic
+        )
+        try LayoutXORReport(
+            differenceCount: 0,
+            differenceAreaSquareMicrometers: 0
+        ).canonicalData().write(
+            to: URL(fileURLWithPath: arguments[reportIndex + 1]),
+            options: .atomic
+        )
+        return TimedProcessResult(exitCode: 0, standardOutput: "", standardError: "")
+    }
+}
+
+private struct SnapshotPathAssertingProcessRunner: TimedProcessRunning {
+    let originalURL: URL
+
+    func run(
+        process: Process,
+        cancellationCheck: (@Sendable () async throws -> Bool)?
+    ) async throws -> TimedProcessResult {
+        let arguments = process.arguments ?? []
+        guard let sourceIndex = arguments.firstIndex(of: "--source-layout"),
+              arguments.indices.contains(sourceIndex + 1),
+              let reportIndex = arguments.firstIndex(of: "--report"),
+              arguments.indices.contains(reportIndex + 1) else {
+            throw TimedProcessError.invalidConfiguration("XOR paths are required")
+        }
+        let executedSourceURL = URL(fileURLWithPath: arguments[sourceIndex + 1])
+        #expect(executedSourceURL.standardizedFileURL != originalURL.standardizedFileURL)
+        #expect(executedSourceURL.deletingLastPathComponent()
+            == process.currentDirectoryURL?.standardizedFileURL)
+        try LayoutXORReport(
+            differenceCount: 0,
+            differenceAreaSquareMicrometers: 0
+        ).canonicalData().write(
             to: URL(fileURLWithPath: arguments[reportIndex + 1]),
             options: .atomic
         )

@@ -27,12 +27,12 @@ where Request == ReleaseAuthorizationRequest,
 `ReleaseAuthorizationRequest` carries:
 
 - the canonical signoff bundle reference;
-- one human `FlowApprovalRecord` bound to that exact artifact;
+- one human `FlowApprovalRecord` whose canonical ledger action and immutable reviewed stage-result snapshot bind that exact artifact;
 - required tool identifiers;
 - ToolQualification request/decision pairs that can be independently recomputed;
 - a fixed evaluation time.
 
-Artifact access and ToolQualification execution are injected into the authorizer. The request contains no filesystem path or concrete storage dependency.
+Artifact access, approval authentication, and ToolQualification execution are injected into the authorizer. `AttestedReleaseApprovalAuthenticator` verifies the approval artifact, human review action, plan, reviewed stage result, and exact signoff bundle binding from a ledger supplied through `ReleaseApprovalLedgerReading`. The owning persistence system must complete transaction recovery, canonical projection validation, and retained-artifact attestation before returning that ledger. ReleaseEngine does not interpret `.xcircuite` paths.
 
 The output status is `.authorized` only when approval, production trust, retained evidence integrity, canonical bytes, release bindings, exact signoff-axis coverage, and the bundle's complete qualification-scope inventory all pass. Caller-provided required tool IDs, decisions, and qualification requests must exactly equal the scopes retained by the bundle. Otherwise it is `.blocked` with structured diagnostics.
 

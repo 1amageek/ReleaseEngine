@@ -8,6 +8,7 @@ import ToolQualification
 public struct DefaultReleaseAuthorizer: ReleaseAuthorizing {
     private let qualificationEngine: any ToolQualificationEngine
     private let artifactReader: any ReleaseArtifactReading
+    private let approvalAuthenticator: any ReleaseApprovalAuthenticating
     private let profileProvider: any SignoffProfileProviding
     private let evidenceValidator: any SignoffEvidenceValidating
     private let evidenceDigester: any SignoffEvidenceDigesting
@@ -16,6 +17,7 @@ public struct DefaultReleaseAuthorizer: ReleaseAuthorizing {
     public init(
         qualificationEngine: any ToolQualificationEngine,
         artifactReader: any ReleaseArtifactReading,
+        approvalAuthenticator: any ReleaseApprovalAuthenticating,
         profileProvider: any SignoffProfileProviding = DefaultSignoffProfileProvider(),
         evidenceValidator: any SignoffEvidenceValidating = DefaultSignoffEvidenceValidator(),
         evidenceDigester: any SignoffEvidenceDigesting = CanonicalSignoffEvidenceDigester(),
@@ -23,6 +25,7 @@ public struct DefaultReleaseAuthorizer: ReleaseAuthorizing {
     ) {
         self.qualificationEngine = qualificationEngine
         self.artifactReader = artifactReader
+        self.approvalAuthenticator = approvalAuthenticator
         self.profileProvider = profileProvider
         self.evidenceValidator = evidenceValidator
         self.evidenceDigester = evidenceDigester
@@ -68,6 +71,7 @@ public struct DefaultReleaseAuthorizer: ReleaseAuthorizing {
             [
                 request.signoffBundle.artifact,
                 request.approval.evidence.plan,
+                request.approval.evidence.stageResult,
             ] + retainedBundleEvidence
                 + retainedOperationalInputs
                 + request.toolQualificationRequests.flatMap(\.inputs)
@@ -103,7 +107,10 @@ public struct DefaultReleaseAuthorizer: ReleaseAuthorizing {
     ) async -> [DesignDiagnostic] {
         guard request.approval.runID == request.runID,
               request.approval.stageID == request.stageID else {
-            return [diagnostic("RELEASE_APPROVAL_SCOPE_MISMATCH", "Approval does not bind the requested run and release stage.")]
+            return [diagnostic(
+                "RELEASE_APPROVAL_SCOPE_MISMATCH",
+                "Approval does not bind the requested run and release stage."
+            )]
         }
         guard request.approval.verdict == .approved else {
             return [diagnostic("RELEASE_APPROVAL_REJECTED", "The release stage was not approved.")]
@@ -115,15 +122,25 @@ public struct DefaultReleaseAuthorizer: ReleaseAuthorizing {
         guard request.approval.createdAt <= request.evaluatedAt else {
             return [diagnostic("RELEASE_APPROVAL_TIMESTAMP_INVALID", "Approval time is later than the authorization evaluation time.")]
         }
-        guard request.approval.evidence.stageResult == request.signoffBundle.artifact else {
-            return [diagnostic("RELEASE_APPROVAL_EVIDENCE_MISMATCH", "Approval is not bound to the exact signoff bundle artifact.")]
-        }
         do {
             _ = try await artifactReader.verifiedData(for: request.approval.evidence.plan)
         } catch {
             return [diagnostic(
                 "RELEASE_APPROVAL_PLAN_EVIDENCE_FAILED",
                 "The human approval plan artifact failed integrity verification: \(error.localizedDescription)"
+            )]
+        }
+        do {
+            try await approvalAuthenticator.authenticate(
+                approval: request.approval,
+                runID: request.runID,
+                signoffBundle: request.signoffBundle.artifact,
+                evaluatedAt: request.evaluatedAt
+            )
+        } catch {
+            return [diagnostic(
+                "RELEASE_APPROVAL_AUTHENTICATION_FAILED",
+                "The human approval could not be authenticated against the canonical run ledger: \(error.localizedDescription)"
             )]
         }
         return []

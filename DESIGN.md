@@ -14,7 +14,7 @@ ReleaseEngine turns immutable domain evidence into three distinct outputs: a sig
 | Canonical `.xcircuite` persistence | Xcircuite |
 | Final release authorization | ReleaseEngine |
 
-`DefaultReleaseAuthorizer` recomputes every supplied ToolQualification decision through a digest-verifying artifact reader. A status value without its descriptor, requirement, health input, and retained raw results is insufficient. Human approval is accepted only when it is an approved human `FlowApprovalRecord` bound to the exact signoff bundle artifact.
+`DefaultReleaseAuthorizer` recomputes every supplied ToolQualification decision through a digest-verifying artifact reader. A status value without its descriptor, requirement, health input, and retained raw results is insufficient. Human approval is accepted only when the canonical run ledger uniquely retains the approved human `FlowApprovalRecord`, its successful human review action, its approval artifact, and the immutable reviewed stage-result snapshot containing the exact signoff bundle artifact.
 
 ## Artifact invariants
 

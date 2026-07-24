@@ -20,6 +20,9 @@ struct ReleaseAuthorizationTests {
         #expect(result.signoffBundle == fixture.bundleReference)
         #expect(result.diagnostics.isEmpty)
         #expect(result.evidence.provenance.inputs.contains(fixture.planArtifact))
+        #expect(result.evidence.provenance.inputs.contains(
+            fixture.request().approval.evidence.stageResult
+        ))
         #expect(result.evidence.provenance.inputs.contains(fixture.bundleReference.artifact))
         #expect(result.evidence.provenance.inputs.contains(fixture.signoffEvidenceArtifact))
         #expect(Set(result.evidence.provenance.inputs).isSuperset(
@@ -143,9 +146,28 @@ struct ReleaseAuthorizationTests {
             evidence: base.approval.evidence
         )
 
-        let result = try await fixture.authorizer().execute(fixture.request(approval: approval))
+        let runMismatch = try await fixture.authorizer().execute(fixture.request(approval: approval))
 
-        #expect(result.diagnostics.contains { $0.code.rawValue == "RELEASE_APPROVAL_SCOPE_MISMATCH" })
+        #expect(runMismatch.diagnostics.contains {
+            $0.code.rawValue == "RELEASE_APPROVAL_SCOPE_MISMATCH"
+        })
+
+        let stageMismatch = FlowApprovalRecord(
+            runID: base.runID,
+            stageID: "other-release-stage",
+            verdict: .approved,
+            reviewer: "reviewer",
+            reviewerKind: .human,
+            createdAt: base.evaluatedAt,
+            evidence: base.approval.evidence
+        )
+        let stageMismatchResult = try await fixture.authorizer().execute(
+            fixture.request(approval: stageMismatch)
+        )
+
+        #expect(stageMismatchResult.diagnostics.contains {
+            $0.code.rawValue == "RELEASE_APPROVAL_SCOPE_MISMATCH"
+        })
     }
 
     @Test("a rejected human verdict cannot authorize release")
@@ -188,7 +210,7 @@ struct ReleaseAuthorizationTests {
         #expect(result.diagnostics.contains { $0.code.rawValue == "RELEASE_APPROVAL_TIMESTAMP_INVALID" })
     }
 
-    @Test("approval evidence must bind the exact signoff artifact")
+    @Test("approval authentication must prove the exact reviewed signoff artifact")
     func rejectsApprovalEvidenceMismatch() async throws {
         let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
@@ -203,9 +225,15 @@ struct ReleaseAuthorizationTests {
             evidence: FlowApprovalEvidenceBinding(plan: fixture.planArtifact, stageResult: fixture.planArtifact)
         )
 
-        let result = try await fixture.authorizer().execute(fixture.request(approval: approval))
+        let result = try await fixture.authorizer(
+            approvalAuthenticator: RejectingReleaseApprovalAuthenticator(
+                error: .signoffBundleNotReviewed
+            )
+        ).execute(fixture.request(approval: approval))
 
-        #expect(result.diagnostics.contains { $0.code.rawValue == "RELEASE_APPROVAL_EVIDENCE_MISMATCH" })
+        #expect(result.diagnostics.contains {
+            $0.code.rawValue == "RELEASE_APPROVAL_AUTHENTICATION_FAILED"
+        })
     }
 
     @Test("human approval plan evidence must retain verified bytes")
@@ -494,7 +522,10 @@ private struct Fixture {
         )
     }
 
-    func authorizer() throws -> DefaultReleaseAuthorizer {
+    func authorizer(
+        approvalAuthenticator: any ReleaseApprovalAuthenticating =
+            AcceptingReleaseApprovalAuthenticator()
+    ) throws -> DefaultReleaseAuthorizer {
         let qualificationReader = LocalToolQualificationArtifactReader(workspaceRoot: root)
         let qualificationEngine = DefaultToolQualificationEngine(
             artifactReader: qualificationReader,
@@ -507,7 +538,8 @@ private struct Fixture {
         )
         return DefaultReleaseAuthorizer(
             qualificationEngine: qualificationEngine,
-            artifactReader: LocalReleaseArtifactReader(workspaceRoot: root)
+            artifactReader: LocalReleaseArtifactReader(workspaceRoot: root),
+            approvalAuthenticator: approvalAuthenticator
         )
     }
 
@@ -552,6 +584,28 @@ private struct Fixture {
             relativeTo: root,
             producer: producer
         )
+    }
+}
+
+private struct AcceptingReleaseApprovalAuthenticator: ReleaseApprovalAuthenticating {
+    func authenticate(
+        approval: FlowApprovalRecord,
+        runID: String,
+        signoffBundle: ArtifactReference,
+        evaluatedAt: Date
+    ) async throws {}
+}
+
+private struct RejectingReleaseApprovalAuthenticator: ReleaseApprovalAuthenticating {
+    let error: ReleaseApprovalAuthenticationError
+
+    func authenticate(
+        approval: FlowApprovalRecord,
+        runID: String,
+        signoffBundle: ArtifactReference,
+        evaluatedAt: Date
+    ) async throws {
+        throw error
     }
 }
 

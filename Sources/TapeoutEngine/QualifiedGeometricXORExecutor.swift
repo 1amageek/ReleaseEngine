@@ -144,13 +144,16 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
             )
         }
 
-        let temporaryDirectory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("release-layout-xor-\(UUID().uuidString)", isDirectory: true)
-        let temporaryReportURL = temporaryDirectory.appendingPathComponent("report.json")
+        let workspace: GeometricXORExecutionWorkspace
         do {
-            try FileManager.default.createDirectory(
-                at: temporaryDirectory,
-                withIntermediateDirectories: false
+            workspace = try GeometricXORExecutionWorkspace.create(
+                executable: executableArtifact,
+                executableURL: executableURL,
+                source: source,
+                sourceURL: sourceURL,
+                streamed: streamed,
+                streamedURL: streamedURL,
+                verifier: verifier
             )
         } catch {
             return result(
@@ -163,22 +166,22 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
         }
 
         let arguments = configuration.arguments + [
-            "--source-layout", sourceURL.path,
-            "--streamed-layout", streamedURL.path,
-            "--report", temporaryReportURL.path,
+            "--source-layout", workspace.sourceURL.path,
+            "--streamed-layout", workspace.streamedURL.path,
+            "--report", workspace.reportURL.path,
         ]
         let invocation: ExecutionInvocation
         let environmentFingerprint: ExecutionEnvironmentFingerprint
         do {
             invocation = try ExecutionInvocation.externalProcess(
-                executable: executableURL.path,
+                executable: workspace.executableURL.path,
                 arguments: arguments,
-                workingDirectory: projectRoot.path
+                workingDirectory: workspace.directoryURL.path
             )
             environmentFingerprint = try makeEnvironmentFingerprint()
         } catch {
             return cleanupFailureOrResult(
-                temporaryDirectory: temporaryDirectory,
+                temporaryDirectory: workspace.directoryURL,
                 fallback: result(
                     status: .blocked,
                     executionStatus: .notExecuted,
@@ -192,10 +195,10 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
         }
 
         let process = Process()
-        process.executableURL = executableURL
+        process.executableURL = workspace.executableURL
         process.arguments = arguments
         process.environment = configuration.environment
-        process.currentDirectoryURL = projectRoot
+        process.currentDirectoryURL = workspace.directoryURL
 
         let processResult: TimedProcessResult
         do {
@@ -204,7 +207,7 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
             })
         } catch let error as TimedProcessError {
             return cleanupFailureOrResult(
-                temporaryDirectory: temporaryDirectory,
+                temporaryDirectory: workspace.directoryURL,
                 fallback: processFailureResult(
                     error,
                     sourceDigest: sourceDigest,
@@ -215,7 +218,7 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
             )
         } catch {
             return cleanupFailureOrResult(
-                temporaryDirectory: temporaryDirectory,
+                temporaryDirectory: workspace.directoryURL,
                 fallback: result(
                     status: .blocked,
                     executionStatus: .launchFailed,
@@ -230,7 +233,7 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
 
         guard processResult.exitCode == 0 else {
             return cleanupFailureOrResult(
-                temporaryDirectory: temporaryDirectory,
+                temporaryDirectory: workspace.directoryURL,
                 fallback: result(
                     status: .failed,
                     executionStatus: .exitedWithFailure,
@@ -247,14 +250,14 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
         let reportData: Data
         let report: LayoutXORReport
         do {
-            reportData = try Data(contentsOf: temporaryReportURL, options: .mappedIfSafe)
+            reportData = try Data(contentsOf: workspace.reportURL, options: .mappedIfSafe)
             report = try JSONDecoder().decode(LayoutXORReport.self, from: reportData)
             guard try report.canonicalData() == reportData else {
                 throw LayoutXORReportError.nonCanonicalEncoding
             }
         } catch {
             return cleanupFailureOrResult(
-                temporaryDirectory: temporaryDirectory,
+                temporaryDirectory: workspace.directoryURL,
                 fallback: result(
                     status: .blocked,
                     executionStatus: .invalidReport,
@@ -269,7 +272,22 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
         }
 
         do {
-            try FileManager.default.removeItem(at: temporaryDirectory)
+            guard workspace.verify(using: verifier) else {
+                return cleanupFailureOrResult(
+                    temporaryDirectory: workspace.directoryURL,
+                    fallback: result(
+                        status: .blocked,
+                        executionStatus: .invalidReport,
+                        sourceDigest: sourceDigest,
+                        streamedDigest: streamedDigest,
+                        message: "A private geometric XOR execution snapshot changed during execution.",
+                        exitCode: processResult.exitCode
+                    ),
+                    sourceDigest: sourceDigest,
+                    streamedDigest: streamedDigest
+                )
+            }
+            try workspace.remove()
         } catch {
             return result(
                 status: .blocked,
@@ -277,17 +295,6 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
                 sourceDigest: sourceDigest,
                 streamedDigest: streamedDigest,
                 message: "The private geometric XOR workspace could not be removed.",
-                exitCode: processResult.exitCode
-            )
-        }
-
-        guard verifier.verify(executableArtifact, relativeTo: projectRoot).isVerified else {
-            return result(
-                status: .blocked,
-                executionStatus: .unqualified,
-                sourceDigest: sourceDigest,
-                streamedDigest: streamedDigest,
-                message: "The qualified geometric XOR executable changed during execution.",
                 exitCode: processResult.exitCode
             )
         }

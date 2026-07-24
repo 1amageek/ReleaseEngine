@@ -37,10 +37,6 @@ struct ReleaseEngineCLI {
             let envelope = try await executeTapeout(arguments: Array(arguments.dropFirst()))
             try writeJSON(envelope)
             return exitCode(for: envelope.status)
-        case "authorize":
-            let envelope = try await executeAuthorization(arguments: Array(arguments.dropFirst()))
-            try writeJSON(envelope)
-            return envelope.status == .authorized ? 0 : 2
         case "help", "--help", "-h":
             printHelp()
             return 0
@@ -69,28 +65,6 @@ struct ReleaseEngineCLI {
         let request = try decoder.decode(TapeoutRequest.self, from: data)
         return try await DefaultTapeoutPackaging(
             artifactPersister: LocalReleaseArtifactStore()
-        ).execute(request)
-    }
-
-    private static func executeAuthorization(arguments: [String]) async throws -> ReleaseAuthorizationResult {
-        let data = try inputData(arguments: arguments)
-        let request = try decoder.decode(ReleaseAuthorizationRequest.self, from: data)
-        guard let rootPath = argumentValue("--project-root", in: arguments) else {
-            throw CLIError.invalidArgument("authorize requires --project-root")
-        }
-        let root = URL(fileURLWithPath: rootPath, isDirectory: true)
-        let qualificationReader = LocalToolQualificationArtifactReader(workspaceRoot: root)
-        let qualificationEngine = DefaultToolQualificationEngine(
-            artifactReader: qualificationReader,
-            producer: try ProducerIdentity(
-                kind: .library,
-                identifier: "ToolQualification",
-                version: "1.0.0"
-            )
-        )
-        return try await DefaultReleaseAuthorizer(
-            qualificationEngine: qualificationEngine,
-            artifactReader: LocalReleaseArtifactReader(workspaceRoot: root)
         ).execute(request)
     }
 
@@ -148,10 +122,11 @@ struct ReleaseEngineCLI {
         release-engine profile [--profile <digital|analog|mixed-signal>]
         release-engine signoff --request <path|->
         release-engine tapeout --request <path|->
-        release-engine authorize --request <path|-> --project-root <path>
 
-        The signoff, tapeout, and authorize commands emit typed JSON results.
-        Exit codes: 0 completed or authorized, 2 blocked, 3 failed, 4 cancelled.
+        The signoff and tapeout commands emit typed JSON results.
+        Release authorization is a host-integrated API because its canonical
+        ledger attestor must be supplied by the owning persistence system.
+        Exit codes: 0 completed, 2 blocked, 3 failed, 4 cancelled.
         """)
     }
 }
