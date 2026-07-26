@@ -19,7 +19,7 @@ let pdkKitDependency: Package.Dependency = isLSIWorkspace && FileManager.default
     atPath: workspaceRoot.appendingPathComponent("PDKKit/Package.swift").path
 )
     ? .package(path: "../PDKKit")
-    : .package(url: "https://github.com/1amageek/PDKKit.git", revision: "7903ccd69a3aa24ebf8ab1076910fab88670ecc1")
+    : .package(url: "https://github.com/1amageek/PDKKit.git", revision: "3ab7e3b6094d2de672b582d90076cf58b6527766")
 
 let toolQualificationDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("ToolQualification/Package.swift").path
@@ -37,7 +37,7 @@ let physicalDesignEngineDependency: Package.Dependency = isLSIWorkspace && FileM
     atPath: workspaceRoot.appendingPathComponent("PhysicalDesignEngine/Package.swift").path
 )
     ? .package(path: "../PhysicalDesignEngine")
-    : .package(url: "https://github.com/1amageek/PhysicalDesignEngine.git", revision: "0c3ad36bdc6893d84a7b81bf8784ed4c8d0af18d")
+    : .package(url: "https://github.com/1amageek/PhysicalDesignEngine.git", revision: "a7bf05dc88da9daea37e256c32d73418484d2a28")
 
 let logicDesignDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("LogicDesign/Package.swift").path
