@@ -28,7 +28,8 @@ public struct CanonicalSignoffEvidenceDigester: SignoffEvidenceDigesting, Sendab
             invocation: sourceProvenance.invocation,
             environment: sourceProvenance.environment,
             configurationDigest: sourceProvenance.configurationDigest,
-            designRevision: sourceProvenance.designRevision,
+            inputDesignRevision: sourceProvenance.inputDesignRevision,
+            outputDesignRevision: sourceProvenance.outputDesignRevision,
             randomSeed: sourceProvenance.randomSeed,
             startedAt: sourceProvenance.startedAt,
             completedAt: sourceProvenance.completedAt
