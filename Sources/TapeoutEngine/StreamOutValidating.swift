@@ -4,5 +4,5 @@ import ReleaseCore
 public protocol StreamOutValidating: Sendable {
     func validate(
         _ request: StreamOutRequest
-    ) -> StreamOutValidationResult
+    ) async -> StreamOutValidationResult
 }

@@ -33,6 +33,12 @@ let designFlowKernelDependency: Package.Dependency = isLSIWorkspace && FileManag
     ? .package(path: "../DesignFlowKernel")
     : .package(url: "https://github.com/1amageek/DesignFlowKernel.git", revision: "5d60047c1c322ed3f8fc741ebee1f35ce7a99533")
 
+let designDatabaseDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
+    atPath: workspaceRoot.appendingPathComponent("DesignDatabase/Package.swift").path
+)
+    ? .package(path: "../DesignDatabase")
+    : .package(url: "https://github.com/1amageek/DesignDatabase.git", branch: "main")
+
 let physicalDesignEngineDependency: Package.Dependency = isLSIWorkspace && FileManager.default.fileExists(
     atPath: workspaceRoot.appendingPathComponent("PhysicalDesignEngine/Package.swift").path
 )
@@ -66,6 +72,7 @@ let package = Package(
         pdkKitDependency,
         toolQualificationDependency,
         designFlowKernelDependency,
+        designDatabaseDependency,
         physicalDesignEngineDependency,
         logicDesignDependency,
         signoffToolSupportDependency,
@@ -73,15 +80,15 @@ let package = Package(
     targets: [
         .target(
             name: "ReleaseCore",
-            dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), .product(name: "DesignFlowKernel", package: "DesignFlowKernel"), .product(name: "PDKCore", package: "PDKKit"), .product(name: "ToolQualification", package: "ToolQualification"), .product(name: "PhysicalDesignCore", package: "PhysicalDesignEngine"), .product(name: "LogicIR", package: "LogicDesign")]
+            dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"), .product(name: "CircuiteFoundationFileSystem", package: "CircuiteFoundation"), .product(name: "CircuiteFoundationFoundation", package: "CircuiteFoundation"), .product(name: "DesignDatabaseCore", package: "DesignDatabase"), .product(name: "DesignFlowKernel", package: "DesignFlowKernel"), .product(name: "PDKCore", package: "PDKKit"), .product(name: "ToolQualification", package: "ToolQualification"), .product(name: "PhysicalDesignCore", package: "PhysicalDesignEngine"), .product(name: "LogicIR", package: "LogicDesign")]
         ),
         .target(
             name: "SignoffEngine",
-            dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), "ReleaseCore", .product(name: "LogicIR", package: "LogicDesign")]
+            dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"), .product(name: "CircuiteFoundationFoundation", package: "CircuiteFoundation"), "ReleaseCore", .product(name: "LogicIR", package: "LogicDesign")]
         ),
         .target(
             name: "TapeoutEngine",
-            dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), .product(name: "SignoffToolSupport", package: "SignoffToolSupport"), .product(name: "ToolQualification", package: "ToolQualification"), "ReleaseCore", "SignoffEngine"]
+            dependencies: [.product(name: "CircuiteFoundation", package: "CircuiteFoundation"), .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"), .product(name: "CircuiteFoundationFoundation", package: "CircuiteFoundation"), .product(name: "SignoffToolSupport", package: "SignoffToolSupport"), .product(name: "ToolQualification", package: "ToolQualification"), "ReleaseCore", "SignoffEngine"]
         ),
         .target(
             name: "ReleaseEngine",
@@ -113,6 +120,10 @@ let package = Package(
                 "TapeoutEngine",
                 "ReleaseEngine",
                 .product(name: "CircuiteFoundation", package: "CircuiteFoundation"),
+                .product(name: "CircuiteFoundationCrypto", package: "CircuiteFoundation"),
+                .product(name: "CircuiteFoundationFoundation", package: "CircuiteFoundation"),
+                .product(name: "CircuiteFoundationFileSystem", package: "CircuiteFoundation"),
+                .product(name: "DesignDatabaseCore", package: "DesignDatabase"),
                 .product(name: "PDKCore", package: "PDKKit"),
                 .product(name: "PhysicalDesignCore", package: "PhysicalDesignEngine"),
                 .product(name: "ToolQualification", package: "ToolQualification"),

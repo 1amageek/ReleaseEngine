@@ -8,8 +8,10 @@ public struct LayoutXORResult: Sendable, Hashable, Codable {
     public var sourceDigest: String?
     public var streamedDigest: String?
     public var message: String
-    public var evidenceArtifact: ArtifactReference?
+    public var evidenceBinding: ReleaseArtifactBinding?
+    public var evidenceArtifact: ArtifactReference? { evidenceBinding?.reference }
     public var processQualification: ToolProcessQualificationEvidence?
+    public var qualificationBindings: [ReleaseArtifactBinding]
     public var executionStatus: LayoutXORExecutionStatus
     public var exitCode: Int32?
     public var differenceCount: UInt64?
@@ -23,8 +25,9 @@ public struct LayoutXORResult: Sendable, Hashable, Codable {
         sourceDigest: String? = nil,
         streamedDigest: String? = nil,
         message: String,
-        evidenceArtifact: ArtifactReference? = nil,
+        evidenceBinding: ReleaseArtifactBinding? = nil,
         processQualification: ToolProcessQualificationEvidence? = nil,
+        qualificationBindings: [ReleaseArtifactBinding] = [],
         executionStatus: LayoutXORExecutionStatus = .notExecuted,
         exitCode: Int32? = nil,
         differenceCount: UInt64? = nil,
@@ -37,8 +40,11 @@ public struct LayoutXORResult: Sendable, Hashable, Codable {
         self.sourceDigest = sourceDigest
         self.streamedDigest = streamedDigest
         self.message = message
-        self.evidenceArtifact = evidenceArtifact
+        self.evidenceBinding = evidenceBinding
         self.processQualification = processQualification
+        self.qualificationBindings = qualificationBindings.sorted {
+            $0.reference.id.description < $1.reference.id.description
+        }
         self.executionStatus = executionStatus
         self.exitCode = exitCode
         self.differenceCount = differenceCount
@@ -58,21 +64,19 @@ public struct LayoutXORResult: Sendable, Hashable, Codable {
             guard let evidenceArtifact,
                   evidenceArtifact.digest.algorithm == .sha256,
                   evidenceArtifact.byteCount > 0,
-                  let producer = evidenceArtifact.producer,
-                  producer.kind == .tool,
+                  let provenance,
+                  provenance.producer.kind == .tool,
                   let processQualification,
                   processQualification.isQualified(at: date, requirePDKScope: true),
-                  producer.identifier == processQualification.scope.implementationID,
-                  producer.version == processQualification.scope.toolVersion,
-                  producer.build?.caseInsensitiveCompare(processQualification.scope.binaryDigest) == .orderedSame,
+                  provenance.producer.identifier == processQualification.scope.implementationID,
+                  provenance.producer.version == processQualification.scope.toolVersion,
+                  provenance.producer.build?.caseInsensitiveCompare(processQualification.scope.binaryDigest) == .orderedSame,
                   executionStatus == .completed,
                   exitCode == 0,
                   differenceCount == 0,
                   differenceAreaSquareMicrometers == 0,
                   differenceAreaSquareMicrometers?.isFinite == true,
                   rawReportDigest == evidenceArtifact.digest,
-                  let provenance,
-                  provenance.producer == producer,
                   provenance.invocation?.mode == .externalProcess,
                   provenance.environment != nil,
                   provenance.inputs.count == 2,

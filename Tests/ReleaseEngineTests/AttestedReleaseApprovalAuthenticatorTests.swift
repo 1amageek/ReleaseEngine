@@ -1,4 +1,5 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
 import DesignFlowKernel
 import Foundation
 import ReleaseEngine
@@ -62,7 +63,7 @@ struct AttestedReleaseApprovalAuthenticatorTests {
                 withIntermediateDirectories: true
             )
             let stageID = "release.signoff"
-            bundle = try Self.write(
+            let bundleBinding = try Self.write(
                 Data("canonical-signoff-bundle".utf8),
                 artifactID: "release-signoff-bundle",
                 path: ".xcircuite/runs/\(runID)/release/signoff-bundle.json",
@@ -70,6 +71,7 @@ struct AttestedReleaseApprovalAuthenticatorTests {
                 kind: .evidence,
                 root: root
             )
+            bundle = bundleBinding.reference
             let plan = FlowRunPlan(
                 runID: runID,
                 intent: "Authorize a reviewed signoff bundle",
@@ -96,7 +98,7 @@ struct AttestedReleaseApprovalAuthenticatorTests {
                     FlowGateResult(gateID: "signoff", status: .passed),
                     FlowGateResult(gateID: "approval", status: .incomplete),
                 ],
-                artifacts: [bundle]
+                artifacts: [bundleBinding]
             )
             let reviewedData = try Self.encode(reviewedResult)
             let reviewedDigest = try SHA256ContentDigester().digest(data: reviewedData)
@@ -132,14 +134,14 @@ struct AttestedReleaseApprovalAuthenticatorTests {
                 root: root
             )
             let action = FlowRunActionRecord(
-                actionID: "approval-\(stageID)-\(approvalReference.digest.hexadecimalValue)",
+                actionID: "approval-\(stageID)-\(approvalReference.reference.digest.hexadecimalValue)",
                 runID: runID,
                 stageID: stageID,
                 actor: FlowRunActor(kind: .human, identifier: approval.reviewer),
                 actionKind: FlowRunReviewDecisionKind.approval.rawValue,
                 status: .succeeded,
-                inputs: [planReference, reviewedReference],
-                outputs: [approvalReference],
+                inputs: [planReference.reference, reviewedReference.reference],
+                outputs: [approvalReference.reference],
                 context: FlowRunActionContext(
                     reviewDecision: .init(
                         kind: .approval,
@@ -152,7 +154,7 @@ struct AttestedReleaseApprovalAuthenticatorTests {
                 createdAt: decidedAt
             )
             let retentionAction = FlowRunActionRecord(
-                actionID: "approval-review-\(stageID)-\(reviewedReference.digest.hexadecimalValue)",
+                actionID: "approval-review-\(stageID)-\(reviewedReference.reference.digest.hexadecimalValue)",
                 runID: runID,
                 stageID: stageID,
                 actor: FlowRunActor(
@@ -161,13 +163,15 @@ struct AttestedReleaseApprovalAuthenticatorTests {
                 ),
                 actionKind: "approval.review.retain",
                 status: .succeeded,
-                inputs: [planReference],
-                outputs: [reviewedReference],
+                inputs: [planReference.reference],
+                outputs: [reviewedReference.reference],
                 createdAt: Date(timeIntervalSince1970: 1_899_999_990)
             )
             let artifacts = [
-                bundle,
+                bundleBinding,
                 planReference,
+                reviewedReference,
+                approvalReference,
             ]
             let startedAt = Date(timeIntervalSince1970: 1_899_999_900)
             let finishedAt = Date(timeIntervalSince1970: 1_899_999_990)
@@ -219,28 +223,32 @@ struct AttestedReleaseApprovalAuthenticatorTests {
             role: ArtifactRole,
             kind: ArtifactKind,
             root: URL
-        ) throws -> ArtifactReference {
+        ) throws -> FlowArtifactBinding {
             let url = root.appending(path: path)
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(),
                 withIntermediateDirectories: true
             )
             try data.write(to: url, options: .atomic)
-            let referenced = try LocalArtifactReferencer().reference(
-                ArtifactLocator(
-                    location: try ArtifactLocation(workspaceRelativePath: path),
+            let reference = try ArtifactReference(
+                digest: SHA256ContentDigester().digest(data: data),
+                byteCount: UInt64(data.count),
+                descriptor: ArtifactDescriptor(
                     role: role,
                     kind: kind,
                     format: .json
-                ),
-                relativeTo: root
+                )
             )
-            return ArtifactReference(
-                id: try ArtifactID(rawValue: artifactID),
-                locator: referenced.locator,
-                digest: referenced.digest,
-                byteCount: referenced.byteCount,
-                producer: referenced.producer
+            return try FlowArtifactBinding(
+                logicalID: artifactID,
+                reference: reference,
+                availability: .local(
+                    artifactID: reference.id,
+                    rootID: ArtifactRootID(rawValue: "release-approval-test-root"),
+                    relativePath: ArtifactRelativePath(
+                        segments: path.split(separator: "/").map(String.init)
+                    )
+                )
             )
         }
     }

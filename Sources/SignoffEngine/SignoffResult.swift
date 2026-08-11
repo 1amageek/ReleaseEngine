@@ -9,7 +9,8 @@ public struct SignoffResult: Sendable, Hashable, Codable {
     public var runID: String
     public var status: ReleaseExecutionStatus
     public var diagnostics: [DesignDiagnostic]
-    public var artifacts: [ArtifactReference]
+    public var artifactBindings: [ReleaseArtifactBinding]
+    public var artifacts: [ArtifactReference] { artifactBindings.map(\.reference) }
     public var provenance: ExecutionProvenance
     public var payload: SignoffPayload
 
@@ -18,7 +19,7 @@ public struct SignoffResult: Sendable, Hashable, Codable {
         runID: String,
         status: ReleaseExecutionStatus,
         diagnostics: [DesignDiagnostic] = [],
-        artifacts: [ArtifactReference] = [],
+        artifactBindings: [ReleaseArtifactBinding] = [],
         metadata: ExecutionProvenance,
         payload: SignoffPayload
     ) {
@@ -26,7 +27,7 @@ public struct SignoffResult: Sendable, Hashable, Codable {
         self.runID = runID
         self.status = status
         self.diagnostics = diagnostics
-        self.artifacts = artifacts
+        self.artifactBindings = artifactBindings
         self.provenance = metadata
         self.payload = payload
     }

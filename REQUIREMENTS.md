@@ -29,7 +29,9 @@ Permit tapeout only when an immutable design has complete, applicable evidence a
 
 - Public execution surfaces are protocol-first, Sendable and dependency-injected.
 - Requests and payloads are Codable, Hashable and schema-versioned.
-- Inputs and outputs use immutable Foundation `ArtifactReference` artifacts.
+- Inputs and outputs use immutable CircuiteFoundation `ArtifactReference` identities separated from explicit `ArtifactAvailability` bindings.
+- Local artifact reads are bounded, integrity-verified, root-capability scoped, and report close failure.
+- Exact release content, approval, qualification, database revision, dependency graph, and active retention inventories are validated without subset fallback.
 - Diagnostics contain a stable code, severity, affected entity and suggested actions.
 - Unsupported semantics and missing prerequisites produce blocked results.
 - Native and external-tool backends conform to identical request and payload schemas.

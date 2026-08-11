@@ -3,15 +3,17 @@ import ReleaseCore
 import CircuiteFoundation
 
 public struct DefaultLayoutXORComparator: LayoutXORComparing {
-    private let verifier: LocalArtifactVerifier
+    private let artifactReader: any ReleaseArtifactReading
 
-    public init(verifier: LocalArtifactVerifier = LocalArtifactVerifier()) {
-        self.verifier = verifier
+    public init(
+        artifactReader: any ReleaseArtifactReading = LocalReleaseArtifactStore()
+    ) {
+        self.artifactReader = artifactReader
     }
 
     public func compare(
-        source: ArtifactReference,
-        streamed: ArtifactReference,
+        source: ReleaseArtifactBinding,
+        streamed: ReleaseArtifactBinding,
         pdkDigest: String,
         projectRoot: URL?
     ) async -> LayoutXORResult {
@@ -19,24 +21,25 @@ public struct DefaultLayoutXORComparator: LayoutXORComparing {
             return LayoutXORResult(
                 status: .blocked,
                 method: .byteIdentity,
-                sourceDigest: source.digest.hexadecimalValue,
-                streamedDigest: streamed.digest.hexadecimalValue,
+                sourceDigest: source.reference.digest.hexadecimalValue,
+                streamedDigest: streamed.reference.digest.hexadecimalValue,
                 message: "A project root is required for exact-stream comparison."
             )
         }
-        let sourceIntegrity = verifier.verify(source, relativeTo: projectRoot)
-        let streamedIntegrity = verifier.verify(streamed, relativeTo: projectRoot)
-        guard sourceIntegrity.isVerified, streamedIntegrity.isVerified else {
+        do {
+            _ = try await artifactReader.load(source, relativeTo: projectRoot)
+            _ = try await artifactReader.load(streamed, relativeTo: projectRoot)
+        } catch {
             return LayoutXORResult(
                 status: .blocked,
                 method: .byteIdentity,
-                sourceDigest: source.digest.hexadecimalValue,
-                streamedDigest: streamed.digest.hexadecimalValue,
+                sourceDigest: source.reference.digest.hexadecimalValue,
+                streamedDigest: streamed.reference.digest.hexadecimalValue,
                 message: "Exact-stream comparison is blocked until both layout artifacts pass integrity verification."
             )
         }
-        let sourceDigest = source.digest.hexadecimalValue
-        let streamedDigest = streamed.digest.hexadecimalValue
+        let sourceDigest = source.reference.digest.hexadecimalValue
+        let streamedDigest = streamed.reference.digest.hexadecimalValue
         if sourceDigest == streamedDigest {
             return LayoutXORResult(
                 status: .passed,

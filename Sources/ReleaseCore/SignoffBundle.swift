@@ -4,7 +4,7 @@ import CircuiteFoundation
 import ToolQualification
 
 public struct SignoffBundle: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 4
+    public static let currentSchemaVersion = 5
 
     public var schemaVersion: Int
     public var bundleID: String
@@ -118,32 +118,22 @@ public struct SignoffBundle: Sendable, Hashable, Codable {
         _ rhs: ArtifactReference
     ) -> Bool {
         let lhsKey = [
-            lhs.id.rawValue,
-            lhs.path,
-            lhs.locator.role.rawValue,
-            lhs.kind.rawValue,
-            lhs.format.rawValue,
+            lhs.id.description,
+            lhs.descriptor.role.rawValue,
+            lhs.descriptor.kind.rawValue,
+            lhs.descriptor.format.rawValue,
             lhs.digest.algorithm.rawValue,
             lhs.digest.hexadecimalValue,
             String(lhs.byteCount),
-            lhs.producer?.kind.rawValue ?? "",
-            lhs.producer?.identifier ?? "",
-            lhs.producer?.version ?? "",
-            lhs.producer?.build ?? "",
         ]
         let rhsKey = [
-            rhs.id.rawValue,
-            rhs.path,
-            rhs.locator.role.rawValue,
-            rhs.kind.rawValue,
-            rhs.format.rawValue,
+            rhs.id.description,
+            rhs.descriptor.role.rawValue,
+            rhs.descriptor.kind.rawValue,
+            rhs.descriptor.format.rawValue,
             rhs.digest.algorithm.rawValue,
             rhs.digest.hexadecimalValue,
             String(rhs.byteCount),
-            rhs.producer?.kind.rawValue ?? "",
-            rhs.producer?.identifier ?? "",
-            rhs.producer?.version ?? "",
-            rhs.producer?.build ?? "",
         ]
         return lhsKey.lexicographicallyPrecedes(rhsKey)
     }
@@ -227,10 +217,13 @@ public struct SignoffBundle: Sendable, Hashable, Codable {
             && evidenceArtifacts.count == artifacts.count
             && (evidenceRecords.isEmpty || recordArtifacts == artifacts)
             && evidenceArtifacts.allSatisfy {
-                $0.locator.location.storage == .workspaceRelative
-                    && $0.digest.algorithm == .sha256
+                $0.digest.algorithm == .sha256
                     && $0.byteCount > 0
-                    && $0.producer != nil
+            }
+            && evidenceRecords.allSatisfy {
+                $0.executionProvenance.producer.kind == .tool
+                    && $0.executionProvenance.producer.identifier == $0.toolID
+                    && $0.executionProvenance.producer.version == $0.toolVersion
             }
             && !toolQualificationScopes.isEmpty
             && toolQualificationScopes.count == scopes.count

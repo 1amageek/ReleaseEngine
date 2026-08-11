@@ -60,32 +60,22 @@ public struct CanonicalSignoffEvidenceDigester: SignoffEvidenceDigesting, Sendab
 
     private func artifactOrder(_ lhs: ArtifactReference, _ rhs: ArtifactReference) -> Bool {
         let lhsKey = [
-            lhs.id.rawValue,
-            lhs.path,
-            lhs.locator.role.rawValue,
-            lhs.kind.rawValue,
-            lhs.format.rawValue,
+            lhs.id.description,
+            lhs.descriptor.role.rawValue,
+            lhs.descriptor.kind.rawValue,
+            lhs.descriptor.format.rawValue,
             lhs.digest.algorithm.rawValue,
             lhs.digest.hexadecimalValue,
             String(lhs.byteCount),
-            lhs.producer?.kind.rawValue ?? "",
-            lhs.producer?.identifier ?? "",
-            lhs.producer?.version ?? "",
-            lhs.producer?.build ?? "",
         ]
         let rhsKey = [
-            rhs.id.rawValue,
-            rhs.path,
-            rhs.locator.role.rawValue,
-            rhs.kind.rawValue,
-            rhs.format.rawValue,
+            rhs.id.description,
+            rhs.descriptor.role.rawValue,
+            rhs.descriptor.kind.rawValue,
+            rhs.descriptor.format.rawValue,
             rhs.digest.algorithm.rawValue,
             rhs.digest.hexadecimalValue,
             String(rhs.byteCount),
-            rhs.producer?.kind.rawValue ?? "",
-            rhs.producer?.identifier ?? "",
-            rhs.producer?.version ?? "",
-            rhs.producer?.build ?? "",
         ]
         return lhsKey.lexicographicallyPrecedes(rhsKey)
     }

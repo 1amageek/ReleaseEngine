@@ -1,27 +1,33 @@
-import CircuiteFoundation
+import DesignFlowKernel
 import Foundation
+import ReleaseCore
 
-public actor LocalReleaseArtifactReader: ReleaseArtifactReading {
+public actor LocalReleaseArtifactReader: ReleaseAuthorizationArtifactReading {
     private let workspaceRoot: URL
-    private let verifier: LocalArtifactVerifier
+    private let reader: any ReleaseArtifactReading
 
-    public init(workspaceRoot: URL, verifier: LocalArtifactVerifier = LocalArtifactVerifier()) {
+    public init(
+        workspaceRoot: URL,
+        reader: any ReleaseArtifactReading = LocalReleaseArtifactStore()
+    ) {
         self.workspaceRoot = workspaceRoot.standardizedFileURL
-        self.verifier = verifier
+        self.reader = reader
     }
 
-    public func verifiedData(for reference: ArtifactReference) async throws -> Data {
-        let integrity = verifier.verify(reference, relativeTo: workspaceRoot)
-        guard integrity.isVerified else {
-            throw ReleaseArtifactReadError.integrityFailure(
-                integrity.issues.map { $0.detail ?? $0.code.rawValue }
-            )
-        }
-        do {
-            let url = try reference.locator.location.resolvedFileURL(relativeTo: workspaceRoot)
-            return try Data(contentsOf: url)
-        } catch {
-            throw ReleaseArtifactReadError.unreadable(error.localizedDescription)
-        }
+    public func verifiedData(
+        for binding: ReleaseArtifactBinding
+    ) async throws -> Data {
+        try await reader.load(binding, relativeTo: workspaceRoot)
+    }
+
+    public func verifiedData(
+        for binding: FlowArtifactBinding
+    ) async throws -> Data {
+        let releaseBinding = try ReleaseArtifactBinding(
+            logicalID: binding.logicalID,
+            reference: binding.reference,
+            availability: binding.availability
+        )
+        return try await reader.load(releaseBinding, relativeTo: workspaceRoot)
     }
 }

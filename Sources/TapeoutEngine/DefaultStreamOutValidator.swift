@@ -3,13 +3,15 @@ import ReleaseCore
 import CircuiteFoundation
 
 public struct DefaultStreamOutValidator: StreamOutValidating {
-    private let verifier: LocalArtifactVerifier
+    private let artifactReader: any ReleaseArtifactReading
 
-    public init(verifier: LocalArtifactVerifier = LocalArtifactVerifier()) {
-        self.verifier = verifier
+    public init(
+        artifactReader: any ReleaseArtifactReading = LocalReleaseArtifactStore()
+    ) {
+        self.artifactReader = artifactReader
     }
 
-    public func validate(_ request: StreamOutRequest) -> StreamOutValidationResult {
+    public func validate(_ request: StreamOutRequest) async -> StreamOutValidationResult {
         var diagnostics: [DesignDiagnostic] = []
         var status: LayoutXORStatus = .passed
 
@@ -44,12 +46,14 @@ public struct DefaultStreamOutValidator: StreamOutValidating {
         let source = request.sourceLayout
         let manifest = request.manifest
         let requirements = request.requirements
-        guard source.layoutArtifact.format == .gdsii || source.layoutArtifact.format == .oasis else {
-            fail("UNSUPPORTED_SOURCE_LAYOUT_FORMAT", "Source layout must use GDSII or OASIS.", entity: source.layoutArtifact.path, blocked: true)
+        let sourceFormat = source.layoutArtifact.descriptor.format
+        let streamedFormat = manifest.streamedArtifact.descriptor.format
+        guard sourceFormat == .gdsii || sourceFormat == .oasis else {
+            fail("UNSUPPORTED_SOURCE_LAYOUT_FORMAT", "Source layout must use GDSII or OASIS.", entity: source.layoutArtifact.reference.id.description, blocked: true)
             return StreamOutValidationResult(status: status, diagnostics: diagnostics)
         }
-        guard manifest.streamedArtifact.format == source.layoutArtifact.format else {
-            fail("STREAM_OUT_FORMAT_MISMATCH", "Streamed layout format must match the source layout format.", entity: manifest.streamedArtifact.path, blocked: false)
+        guard streamedFormat == sourceFormat else {
+            fail("STREAM_OUT_FORMAT_MISMATCH", "Streamed layout format must match the source layout format.", entity: manifest.streamedArtifact.reference.id.description, blocked: false)
             return StreamOutValidationResult(status: status, diagnostics: diagnostics)
         }
         if source.topCell != requirements.expectedTopCell || manifest.topCell != requirements.expectedTopCell {
@@ -84,59 +88,33 @@ public struct DefaultStreamOutValidator: StreamOutValidating {
         if manifest.generatedBy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             fail("STREAM_OUT_PRODUCER_REQUIRED", "Stream-out manifest must identify the generator.", entity: manifest.topCell, blocked: true)
         }
-        if source.layoutArtifact.digest.algorithm != .sha256
-            || source.layoutDigest != source.layoutArtifact.digest.hexadecimalValue {
-            fail("SOURCE_LAYOUT_DIGEST_MISMATCH", "Physical design layout digest does not match its artifact reference.", entity: source.layoutArtifact.path, blocked: false)
+        if source.layoutArtifact.reference.digest.algorithm != .sha256
+            || source.layoutDigest != source.layoutArtifact.reference.digest.hexadecimalValue {
+            fail("SOURCE_LAYOUT_DIGEST_MISMATCH", "Physical design layout digest does not match its artifact reference.", entity: source.layoutArtifact.reference.id.description, blocked: false)
         }
 
-        let sourceIntegrity = verifier.verify(source.layoutArtifact, relativeTo: projectRoot)
-        if !sourceIntegrity.isVerified {
-            fail("SOURCE_LAYOUT_INTEGRITY_FAILED", integrityMessage(sourceIntegrity), entity: source.layoutArtifact.path, blocked: true)
-        }
-        let streamedIntegrity = verifier.verify(manifest.streamedArtifact, relativeTo: projectRoot)
-        if !streamedIntegrity.isVerified {
-            fail("STREAMED_LAYOUT_INTEGRITY_FAILED", integrityMessage(streamedIntegrity), entity: manifest.streamedArtifact.path, blocked: true)
-        }
-
-        if let sourceData = readData(at: resolvedURL(for: source.layoutArtifact, projectRoot: projectRoot)) {
-            if !hasValidSignature(sourceData, format: source.layoutArtifact.format) {
-                fail("SOURCE_LAYOUT_SIGNATURE_INVALID", "Source layout bytes do not contain the expected GDSII or OASIS signature.", entity: source.layoutArtifact.path, blocked: false)
+        do {
+            let sourceBinding = try ReleaseArtifactBinding(
+                logicalID: source.layoutArtifact.logicalID,
+                reference: source.layoutArtifact.reference,
+                availability: source.layoutArtifact.availability
+            )
+            let sourceData = try await artifactReader.load(sourceBinding, relativeTo: projectRoot)
+            let streamedData = try await artifactReader.load(
+                manifest.streamedArtifact,
+                relativeTo: projectRoot
+            )
+            if !hasValidSignature(sourceData, format: sourceFormat) {
+                fail("SOURCE_LAYOUT_SIGNATURE_INVALID", "Source layout bytes do not contain the expected GDSII or OASIS signature.", entity: source.layoutArtifact.reference.id.description, blocked: false)
             }
-        } else {
-            fail("SOURCE_LAYOUT_UNREADABLE", "Source layout bytes could not be read for format validation.", entity: source.layoutArtifact.path, blocked: true)
-        }
-        if let streamedData = readData(at: resolvedURL(for: manifest.streamedArtifact, projectRoot: projectRoot)) {
-            if !hasValidSignature(streamedData, format: manifest.streamedArtifact.format) {
-                fail("STREAMED_LAYOUT_SIGNATURE_INVALID", "Streamed layout bytes do not contain the expected GDSII or OASIS signature.", entity: manifest.streamedArtifact.path, blocked: false)
+            if !hasValidSignature(streamedData, format: streamedFormat) {
+                fail("STREAMED_LAYOUT_SIGNATURE_INVALID", "Streamed layout bytes do not contain the expected GDSII or OASIS signature.", entity: manifest.streamedArtifact.reference.id.description, blocked: false)
             }
-        } else {
-            fail("STREAMED_LAYOUT_UNREADABLE", "Streamed layout bytes could not be read for format validation.", entity: manifest.streamedArtifact.path, blocked: true)
+        } catch {
+            fail("STREAM_OUT_ARTIFACT_INTEGRITY_FAILED", "Source or streamed layout bytes failed exact binding verification: \(error.localizedDescription)", entity: manifest.topCell, blocked: true)
         }
 
         return StreamOutValidationResult(status: status, diagnostics: diagnostics)
-    }
-
-    private func readData(at url: URL?) -> Data? {
-        guard let url else { return nil }
-        do {
-            return try Data(contentsOf: url)
-        } catch {
-            return nil
-        }
-    }
-
-    private func resolvedURL(for reference: ArtifactReference, projectRoot: URL) -> URL? {
-        do {
-            return try reference.locator.location.resolvedFileURL(relativeTo: projectRoot)
-        } catch {
-            return nil
-        }
-    }
-
-    private func integrityMessage(_ integrity: ArtifactIntegrity) -> String {
-        integrity.issues.map { issue in
-            issue.detail ?? issue.code.rawValue
-        }.joined(separator: "; ")
     }
 
     private func hasValidSignature(_ data: Data, format: ArtifactFormat) -> Bool {

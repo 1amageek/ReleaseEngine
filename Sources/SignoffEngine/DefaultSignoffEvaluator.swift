@@ -3,6 +3,8 @@ import LogicIR
 import ReleaseCore
 import ToolQualification
 import CircuiteFoundation
+import CircuiteFoundationCrypto
+import CircuiteFoundationFoundation
 
 public struct DefaultSignoffEvaluator: SignoffEvaluating {
     private let profileProvider: any SignoffProfileProviding
@@ -84,9 +86,13 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                 )
             })
 
-        let evidenceValidation = evidenceValidator.validate(
+        let evidenceValidation = await evidenceValidator.validate(
             evidence: request.evidenceRecords,
+            bindings: uniqueBindings(
+                request.inputBindings + request.evidenceBindings
+            ),
             projectRoot: request.projectRoot.map(URL.init(fileURLWithPath:)),
+            rootID: request.bundleOutput.rootID,
             designDigest: request.designDigest,
             pdkDigest: request.pdkDigest,
             profile: profile,
@@ -254,7 +260,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                     request: request,
                     status: status,
                     diagnostics: diagnostics,
-                    artifacts: request.evidenceRecords.map(\.artifact),
+                    artifactBindings: request.evidenceBindings,
                     startedAt: startedAt,
                     payload: SignoffPayload(
                         passed: false,
@@ -268,10 +274,9 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                     )
                 )
             }
-            guard request.bundleOutput.location.storage == .workspaceRelative,
-                  request.bundleOutput.role == .output,
-                  request.bundleOutput.kind == .release,
-                  request.bundleOutput.format == .json else {
+            guard request.bundleOutput.descriptor.role == .output,
+                  request.bundleOutput.descriptor.kind == .release,
+                  request.bundleOutput.descriptor.format == .json else {
                 diagnostics.append(diagnostic(
                     "SIGNOFF_BUNDLE_TARGET_INVALID",
                     "A passing signoff result must target a project-relative release output in JSON format.",
@@ -283,7 +288,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                     request: request,
                     status: status,
                     diagnostics: diagnostics,
-                    artifacts: request.evidenceRecords.map(\.artifact),
+                    artifactBindings: request.evidenceBindings,
                     startedAt: startedAt,
                     payload: SignoffPayload(
                         passed: false,
@@ -308,7 +313,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                     request: request,
                     status: .blocked,
                     diagnostics: diagnostics,
-                    artifacts: request.evidenceRecords.map(\.artifact),
+                    artifactBindings: request.evidenceBindings,
                     startedAt: startedAt,
                     payload: SignoffPayload(
                         passed: false,
@@ -351,7 +356,8 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                 )
                 let bundleArtifact = try await artifactPersister.persist(
                     ReleaseArtifactPersistenceRequest(
-                        locator: request.bundleOutput,
+                        logicalID: "\(request.runID)-signoff-bundle",
+                        destination: request.bundleOutput,
                         bytes: bytes,
                         producer: producer
                     ),
@@ -360,9 +366,8 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                 try await verifyPersistedBundle(
                     expected: bundle,
                     artifact: bundleArtifact,
-                    expectedLocator: request.bundleOutput,
+                    expectedDestination: request.bundleOutput,
                     expectedBytes: bytes,
-                    producer: producer,
                     projectRoot: projectRoot
                 )
                 bundleReference = SignoffBundleReference(
@@ -376,13 +381,13 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
                 diagnostics.append(diagnostic(
                     "SIGNOFF_BUNDLE_PERSISTENCE_BLOCKED",
                     "The generated signoff bundle could not be persisted and verified immutably: \(error.localizedDescription)",
-                    entity: request.bundleOutput.location.value
+                    entity: request.bundleOutput.materializationDescription
                 ))
                 return try envelope(
                     request: request,
                     status: .blocked,
                     diagnostics: diagnostics,
-                    artifacts: request.evidenceRecords.map(\.artifact),
+                    artifactBindings: request.evidenceBindings,
                     startedAt: startedAt,
                     payload: SignoffPayload(
                         passed: false,
@@ -398,7 +403,9 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             }
         }
 
-        let artifacts = uniqueArtifacts(request.evidenceRecords.map(\.artifact) + [bundleReference?.artifact].compactMap { $0 })
+        let artifactBindings = uniqueBindings(
+            request.evidenceBindings + [bundleReference?.artifact].compactMap { $0 }
+        )
         let payload = SignoffPayload(
             passed: bundleReference != nil && status == .completed,
             blockedAxes: blockedAxes,
@@ -413,7 +420,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             request: request,
             status: status,
             diagnostics: diagnostics,
-            artifacts: artifacts,
+            artifactBindings: artifactBindings,
             startedAt: startedAt,
             payload: payload
         )
@@ -446,7 +453,19 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
     }
 
     private func uniqueArtifacts(_ artifacts: [ArtifactReference]) -> [ArtifactReference] {
-        Array(Set(artifacts)).sorted { $0.id.rawValue < $1.id.rawValue }
+        Array(Set(artifacts)).sorted { $0.id.description < $1.id.description }
+    }
+
+    private func uniqueBindings(
+        _ bindings: [ReleaseArtifactBinding]
+    ) -> [ReleaseArtifactBinding] {
+        var byReference: [ArtifactReference: ReleaseArtifactBinding] = [:]
+        for binding in bindings {
+            byReference[binding.reference] = binding
+        }
+        return byReference.values.sorted {
+            $0.reference.id.description < $1.reference.id.description
+        }
     }
 
     private func validateRequestArtifactBindings(
@@ -471,11 +490,22 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             requiredInputs.formUnion(qualification.inputArtifacts)
             requiredInputs.formUnion(qualification.outputArtifacts)
         }
-        for missing in requiredInputs.subtracting(declaredInputs).sorted(by: { $0.path < $1.path }) {
+        for missing in requiredInputs.subtracting(declaredInputs).sorted(by: {
+            $0.id.description < $1.id.description
+        }) {
             diagnostics.append(diagnostic(
                 "SIGNOFF_INPUT_BINDING_MISSING",
                 "The signoff request must bind every design, PDK, qualification, and bundle input used by the decision.",
-                entity: missing.path
+                entity: missing.id.description
+            ))
+        }
+        let allBindings = request.inputBindings + request.evidenceBindings
+        for group in Dictionary(grouping: allBindings, by: \.reference).values
+            where Set(group.map(\.availability)).count != 1 {
+            diagnostics.append(diagnostic(
+                "SIGNOFF_ARTIFACT_MATERIALIZATION_CONFLICT",
+                "One content identity cannot resolve to multiple materializations in a signoff request.",
+                entity: group.first?.reference.id.description
             ))
         }
         return diagnostics
@@ -483,19 +513,22 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
 
     private func verifyPersistedBundle(
         expected: SignoffBundle,
-        artifact: ArtifactReference,
-        expectedLocator: ArtifactLocator,
+        artifact: ReleaseArtifactBinding,
+        expectedDestination: ReleaseArtifactDestination,
         expectedBytes: Data,
-        producer: ProducerIdentity,
         projectRoot: URL
     ) async throws {
-        guard artifact.locator == expectedLocator,
-              artifact.producer == producer else {
+        guard artifact.reference.descriptor == expectedDestination.descriptor,
+              artifact.availability == .local(
+                artifactID: artifact.reference.id,
+                rootID: expectedDestination.rootID,
+                relativePath: expectedDestination.relativePath
+              ) else {
             throw SignoffBundlePersistenceError.referenceMismatch
         }
         let expectedDigest = try SHA256ContentDigester().digest(data: expectedBytes)
-        guard artifact.digest == expectedDigest,
-              artifact.byteCount == UInt64(expectedBytes.count) else {
+        guard artifact.reference.digest == expectedDigest,
+              artifact.reference.byteCount == UInt64(expectedBytes.count) else {
             throw SignoffBundlePersistenceError.referenceMismatch
         }
         let persistedBytes = try await artifactPersister.load(artifact, relativeTo: projectRoot)
@@ -525,7 +558,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
         request: SignoffRequest,
         status: ReleaseExecutionStatus,
         diagnostics: [DesignDiagnostic],
-        artifacts: [ArtifactReference],
+        artifactBindings: [ReleaseArtifactBinding],
         startedAt: Date,
         payload: SignoffPayload
     ) throws -> SignoffResult {
@@ -551,7 +584,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             runID: request.runID,
             status: status,
             diagnostics: diagnostics,
-            artifacts: artifacts,
+            artifactBindings: artifactBindings,
             metadata: metadata,
             payload: payload
         )
@@ -566,7 +599,7 @@ public struct DefaultSignoffEvaluator: SignoffEvaluating {
             request: request,
             status: .blocked,
             diagnostics: diagnostics,
-            artifacts: [],
+            artifactBindings: [],
             startedAt: startedAt,
             payload: SignoffPayload(
                 passed: false,

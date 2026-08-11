@@ -3,13 +3,15 @@ import PDKCore
 import PhysicalDesignCore
 import ReleaseCore
 import CircuiteFoundation
+import CircuiteFoundationCrypto
+import CircuiteFoundationFoundation
 
 public struct DefaultTapeoutPackaging: TapeoutPackaging {
     private let streamEncoder: any LayoutStreamEncoding
     private let artifactPersister: any ReleaseArtifactPersisting
     private let streamOutValidator: any StreamOutValidating
     private let xorComparator: any LayoutXORComparing
-    private let verifier: LocalArtifactVerifier
+    private let exactBundleValidator: any ReleaseExactBundleValidating
     private let now: @Sendable () -> Date
 
     public init(
@@ -17,14 +19,14 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
         streamEncoder: any LayoutStreamEncoding = ExactLayoutStreamEncoder(),
         streamOutValidator: any StreamOutValidating = DefaultStreamOutValidator(),
         xorComparator: any LayoutXORComparing = DefaultLayoutXORComparator(),
-        verifier: LocalArtifactVerifier = LocalArtifactVerifier(),
+        exactBundleValidator: any ReleaseExactBundleValidating = DefaultReleaseExactBundleValidator(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.artifactPersister = artifactPersister
         self.streamEncoder = streamEncoder
         self.streamOutValidator = streamOutValidator
         self.xorComparator = xorComparator
-        self.verifier = verifier
+        self.exactBundleValidator = exactBundleValidator
         self.now = now
     }
 
@@ -38,11 +40,11 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
         )
         var diagnostics: [DesignDiagnostic] = []
         var status: ReleaseExecutionStatus = .completed
-        var streamedArtifact: ArtifactReference?
+        var streamedArtifact: ReleaseArtifactBinding?
         var streamOutManifest: StreamOutManifest?
         var xorResult: LayoutXORResult?
         var handoff: FoundryHandoffManifest?
-        var handoffArtifact: ArtifactReference?
+        var handoffArtifact: ReleaseArtifactBinding?
 
         func add(_ code: String, _ message: String, entity: String?, blocked: Bool) {
             diagnostics.append(DesignDiagnostic(
@@ -76,10 +78,22 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
             return try envelope(request: request, status: status, diagnostics: diagnostics, startedAt: startedAt, producer: producer, payload: emptyPayload(request))
         }
         let projectRoot = URL(fileURLWithPath: projectRootPath)
+        let physicalDesignBinding: ReleaseArtifactBinding
+        do {
+            physicalDesignBinding = try ReleaseArtifactBinding(
+                logicalID: request.physicalDesign.layoutArtifact.logicalID,
+                reference: request.physicalDesign.layoutArtifact.reference,
+                availability: request.physicalDesign.layoutArtifact.availability
+            )
+        } catch {
+            add("PHYSICAL_DESIGN_BINDING_INVALID", error.localizedDescription, entity: request.runID, blocked: true)
+            return try envelope(request: request, status: status, diagnostics: diagnostics, startedAt: startedAt, producer: producer, payload: emptyPayload(request))
+        }
 
         validateReleaseBindings(request, add: add)
-        verifyRetainedArtifacts(
+        await verifyRetainedArtifacts(
             request,
+            physicalDesignBinding: physicalDesignBinding,
             projectRoot: projectRoot,
             evaluatedAt: startedAt,
             add: add
@@ -89,12 +103,12 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
                 request: request,
                 status: status,
                 diagnostics: diagnostics,
-                artifacts: uniqueArtifacts([
-                    request.authorization,
+                artifactBindings: uniqueBindings([
+                    request.authorizationBinding,
                     request.signoffBundle.artifact,
-                    request.pdk.manifest,
-                    request.physicalDesign.layoutArtifact,
-                ] + request.evidence),
+                    request.pdkManifestBinding,
+                    physicalDesignBinding,
+                ] + request.evidenceBindings),
                 startedAt: startedAt,
                 producer: producer,
                 payload: emptyPayload(request)
@@ -106,10 +120,10 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
             try validateHandoffTarget(request.handoffOutput)
             let bytes = try await streamEncoder.encode(
                 request.physicalDesign,
-                format: generation.output.format,
+                format: generation.output.descriptor.format,
                 relativeTo: projectRoot
             )
-            guard hasValidLayoutSignature(bytes, format: generation.output.format) else {
+            guard hasValidLayoutSignature(bytes, format: generation.output.descriptor.format) else {
                 throw TapeoutArtifactGenerationError.invalidStreamOutRequest(
                     "generated bytes do not contain the declared standard-stream signature"
                 )
@@ -121,16 +135,16 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
                 build: ReleaseRuntimeIdentity.currentExecutableDigest()
             )
             let artifact = try await persist(
-                locator: generation.output,
+                logicalID: "\(request.runID)-stream-out",
+                destination: generation.output,
                 bytes: bytes,
                 producer: streamProducer,
                 projectRoot: projectRoot
             )
             try await verifyPersistedArtifact(
                 artifact,
-                expectedLocator: generation.output,
+                expectedDestination: generation.output,
                 expectedBytes: bytes,
-                expectedProducer: streamProducer,
                 projectRoot: projectRoot
             )
             streamedArtifact = artifact
@@ -145,7 +159,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
                 generatedBy: "\(generation.generatorID)@\(generation.generatorVersion)"
             )
             streamOutManifest = manifest
-            let validation = streamOutValidator.validate(StreamOutRequest(
+            let validation = await streamOutValidator.validate(StreamOutRequest(
                 sourceLayout: request.physicalDesign,
                 manifest: manifest,
                 projectRoot: projectRoot.path,
@@ -177,7 +191,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
 
         if let streamedArtifact {
             xorResult = await xorComparator.compare(
-                source: request.physicalDesign.layoutArtifact,
+                source: physicalDesignBinding,
                 streamed: streamedArtifact,
                 pdkDigest: request.pdk.digest,
                 projectRoot: projectRoot
@@ -204,26 +218,31 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
             }
         }
 
-        verifyXORArtifacts(xorResult, projectRoot: projectRoot, add: add)
+        await verifyXORArtifacts(
+            xorResult,
+            request: request,
+            projectRoot: projectRoot,
+            add: add
+        )
 
         if status == .completed, let streamedArtifact, let xorResult {
             let generatedAt = now()
             let xorArtifacts = retainedXORArtifacts(xorResult)
             let evidenceIDs = Array(Set(
-                request.evidence.map(\.artifactID)
-                    + xorArtifacts.map(\.artifactID)
+                request.evidence.map { $0.id.description }
+                    + xorArtifacts.map { $0.id.description }
             )).sorted()
             let artifacts = uniqueArtifacts([
                 request.authorization,
-                request.signoffBundle.artifact,
+                request.signoffBundle.artifact.reference,
                 request.pdk.manifest,
-                request.physicalDesign.layoutArtifact,
-                streamedArtifact,
+                request.physicalDesign.layoutArtifact.reference,
+                streamedArtifact.reference,
             ] + request.evidence + xorArtifacts)
             let unsigned = FoundryHandoffManifest(
                 releaseID: "\(request.runID)-tapeout",
                 foundryID: request.foundryID,
-                signoffBundleArtifactDigest: request.signoffBundle.artifact.digest.hexadecimalValue,
+                signoffBundleArtifactDigest: request.signoffBundle.artifact.reference.digest.hexadecimalValue,
                 designDigest: request.signoffBundle.designDigest,
                 pdkDigest: request.pdk.digest,
                 layoutDigest: request.physicalDesign.layoutDigest,
@@ -249,16 +268,16 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
             do {
                 let bytes = try generatedHandoff.canonicalData()
                 let artifact = try await persist(
-                    locator: request.handoffOutput,
+                    logicalID: "\(request.runID)-foundry-handoff",
+                    destination: request.handoffOutput,
                     bytes: bytes,
                     producer: producer,
                     projectRoot: projectRoot
                 )
                 try await verifyPersistedArtifact(
                     artifact,
-                    expectedLocator: request.handoffOutput,
+                    expectedDestination: request.handoffOutput,
                     expectedBytes: bytes,
-                    expectedProducer: producer,
                     projectRoot: projectRoot
                 )
                 let persistedBytes = try await artifactPersister.load(artifact, relativeTo: projectRoot)
@@ -279,7 +298,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
 
         let completed = status == .completed && handoff != nil && handoffArtifact != nil
         let payload = TapeoutPayload(
-            handoffArtifact: completed ? handoffArtifact : nil,
+            handoffBinding: completed ? handoffArtifact : nil,
             checksum: completed ? handoff?.manifestDigest : nil,
             completed: completed,
             layoutDigest: request.physicalDesign.layoutDigest,
@@ -292,13 +311,13 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
             request: request,
             status: completed ? .completed : status,
             diagnostics: diagnostics,
-            artifacts: uniqueArtifacts([
-                request.authorization,
+            artifactBindings: uniqueBindings([
+                request.authorizationBinding,
                 request.signoffBundle.artifact,
-                request.pdk.manifest,
-                request.physicalDesign.layoutArtifact,
-            ] + request.evidence
-                + (xorResult.map(retainedXORArtifacts) ?? [])
+                request.pdkManifestBinding,
+                physicalDesignBinding,
+            ] + request.evidenceBindings
+                + (xorResult.map { retainedXORBindings($0, request: request) } ?? [])
                 + [streamedArtifact, handoffArtifact].compactMap { $0 }),
             additionalInputs: xorResult.map(retainedXORArtifacts) ?? [],
             startedAt: startedAt,
@@ -311,63 +330,80 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
         _ request: TapeoutRequest,
         add: (String, String, String?, Bool) -> Void
     ) {
+        do {
+            try exactBundleValidator.validate(request.exactReleaseBundle)
+        } catch {
+            add(
+                "TAPEOUT_EXACT_RELEASE_BUNDLE_INVALID",
+                "The exact release bundle is invalid: \(String(describing: error))",
+                request.runID,
+                true
+            )
+        }
+
         let bundle = request.signoffBundle
         let requiredInputs = Set([
             request.authorization,
-            bundle.artifact,
+            bundle.artifact.reference,
             request.pdk.manifest,
-            request.physicalDesign.layoutArtifact,
+            request.physicalDesign.layoutArtifact.reference,
         ] + request.evidence)
         let declaredInputs = Set(request.inputs)
-        for missing in requiredInputs.subtracting(declaredInputs).sorted(by: { $0.path < $1.path }) {
+        for missing in requiredInputs.subtracting(declaredInputs).sorted(by: {
+            $0.id.description < $1.id.description
+        }) {
             add(
                 "TAPEOUT_INPUT_BINDING_MISSING",
                 "Tapeout inputs must include every signoff, PDK, layout, and evidence artifact used by the request.",
-                missing.path,
+                missing.id.description,
                 true
             )
         }
-        if bundle.artifact.kind != .release {
-            add("SIGNOFF_BUNDLE_KIND_INVALID", "Tapeout accepts only a release-kind signoff bundle artifact.", bundle.artifact.path, true)
+        let exactContent = Set(request.exactReleaseBundle.contentIdentities)
+        let requiredExactContent = Set(
+            [
+                bundle.artifact.reference.id,
+                request.pdk.manifest.id,
+                request.physicalDesign.layoutArtifact.reference.id,
+            ] + request.evidence.map(\.id)
+        )
+        if !requiredExactContent.isSubset(of: exactContent) {
+            add(
+                "TAPEOUT_EXACT_CONTENT_BINDING_MISMATCH",
+                "The exact release bundle must retain the signoff, PDK, layout, and evidence content identities used for tapeout.",
+                request.runID,
+                true
+            )
         }
-        if request.authorization.kind != .report
-            || request.authorization.format != .json
-            || request.authorization.producer?.kind != .engine
-            || request.authorization.producer?.identifier != "native.release.authorization"
-            || request.authorization.producer?.version != "2.0.0"
-            || !isSHA256(request.authorization.producer?.build ?? "") {
+        if bundle.artifact.reference.descriptor.kind != .release {
+            add("SIGNOFF_BUNDLE_KIND_INVALID", "Tapeout accepts only a release-kind signoff bundle artifact.", bundle.artifact.reference.id.description, true)
+        }
+        if request.authorization.descriptor.kind != .report
+            || request.authorization.descriptor.format != .json {
             add(
                 "RELEASE_AUTHORIZATION_ARTIFACT_INVALID",
-                "Tapeout requires the canonical producer-bound release authorization result artifact.",
-                request.authorization.path,
-                true
-            )
-        }
-        if bundle.artifact.producer?.kind != .engine
-            || bundle.artifact.producer?.identifier != "native.release.signoff"
-            || bundle.artifact.producer?.version != "2.0.0"
-            || !isSHA256(bundle.artifact.producer?.build ?? "") {
-            add(
-                "SIGNOFF_BUNDLE_PRODUCER_INVALID",
-                "Tapeout requires a bundle produced by the canonical signoff engine and exact version.",
-                bundle.artifact.path,
+                "Tapeout requires a typed JSON release authorization artifact.",
+                request.authorization.id.description,
                 true
             )
         }
         if !isSHA256(bundle.designDigest) || !isSHA256(bundle.pdkDigest) {
-            add("SIGNOFF_BUNDLE_DIGEST_REQUIRED", "Signoff bundle design and PDK digests must be SHA-256 values.", bundle.artifact.path, true)
+            add("SIGNOFF_BUNDLE_DIGEST_REQUIRED", "Signoff bundle design and PDK digests must be SHA-256 values.", bundle.artifact.reference.id.description, true)
         }
         if bundle.pdkDigest != request.pdk.digest {
-            add("SIGNOFF_PDK_BINDING_MISMATCH", "Signoff bundle is bound to a different PDK revision.", bundle.artifact.path, false)
+            add("SIGNOFF_PDK_BINDING_MISMATCH", "Signoff bundle is bound to a different PDK revision.", bundle.artifact.reference.id.description, false)
         }
         if bundle.finalLayoutDigest != request.physicalDesign.layoutDigest {
-            add("SIGNOFF_LAYOUT_BINDING_MISMATCH", "Signoff bundle is not bound to the exact final layout revision.", bundle.artifact.path, false)
+            add("SIGNOFF_LAYOUT_BINDING_MISMATCH", "Signoff bundle is not bound to the exact final layout revision.", bundle.artifact.reference.id.description, false)
         }
-        if bundle.artifact.byteCount == 0 || bundle.artifact.path.isEmpty {
-            add("SIGNOFF_BUNDLE_ARTIFACT_INCOMPLETE", "Signoff bundle artifact reference must include path, SHA-256, and byte count.", bundle.artifact.path, true)
+        if bundle.artifact.reference.byteCount == 0 {
+            add("SIGNOFF_BUNDLE_ARTIFACT_INCOMPLETE", "Signoff bundle artifact identity must include SHA-256 and byte count.", bundle.artifact.reference.id.description, true)
         }
-        if request.pdk.manifest.kind != .technology {
-            add("PDK_MANIFEST_KIND_INVALID", "PDK reference must point to a technology manifest artifact.", request.pdk.manifest.path, true)
+        if request.pdk.manifest.descriptor.kind != .technology {
+            add("PDK_MANIFEST_KIND_INVALID", "PDK reference must point to a technology manifest artifact.", request.pdk.manifest.id.description, true)
+        }
+        if request.pdkManifestBinding.reference != request.pdk.manifest {
+            add("PDK_MANIFEST_BINDING_MISMATCH", "PDK availability must bind the exact manifest content identity.", request.pdk.manifest.id.description, true)
         }
         do {
             try request.pdk.validate()
@@ -375,34 +411,34 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
             add(
                 "PDK_REFERENCE_INVALID",
                 "The PDK reference does not bind its exact immutable manifest: \(error.localizedDescription)",
-                request.pdk.manifest.path,
+                request.pdk.manifest.id.description,
                 true
             )
         }
         if request.physicalDesign.topCell.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || request.physicalDesign.layoutArtifact.kind != .layout
-            || request.physicalDesign.layoutArtifact.digest.algorithm != .sha256
+            || request.physicalDesign.layoutArtifact.descriptor.kind != .layout
+            || request.physicalDesign.layoutArtifact.reference.digest.algorithm != .sha256
             || request.physicalDesign.layoutDigest.caseInsensitiveCompare(
-                request.physicalDesign.layoutArtifact.digest.hexadecimalValue
+                request.physicalDesign.layoutArtifact.reference.digest.hexadecimalValue
             ) != .orderedSame {
             add(
                 "PHYSICAL_DESIGN_REFERENCE_INVALID",
                 "The physical design must bind a non-empty top cell and the exact immutable layout artifact digest.",
-                request.physicalDesign.layoutArtifact.path,
+                request.physicalDesign.layoutArtifact.reference.id.description,
                 true
             )
         }
-        let handoffInputs = [
-            request.authorization,
-            bundle.artifact,
-            request.pdk.manifest,
-            request.physicalDesign.layoutArtifact,
-        ] + request.evidence
-        for artifact in handoffInputs where artifact.producer == nil {
+        let allBindings = request.inputBindings + request.evidenceBindings + [
+            request.authorizationBinding,
+            request.signoffBundle.artifact,
+            request.pdkManifestBinding,
+        ]
+        for group in Dictionary(grouping: allBindings, by: \.reference).values
+            where Set(group.map(\.availability)).count != 1 {
             add(
-                "HANDOFF_ARTIFACT_PRODUCER_REQUIRED",
-                "Every artifact entering the foundry handoff must retain its exact producer identity.",
-                artifact.path,
+                "TAPEOUT_ARTIFACT_MATERIALIZATION_CONFLICT",
+                "One content identity cannot resolve to multiple materializations in a tapeout request.",
+                group.first?.reference.id.description,
                 true
             )
         }
@@ -415,18 +451,18 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
         guard generation.schemaVersion == StreamOutGenerationRequest.currentSchemaVersion else {
             throw TapeoutArtifactGenerationError.invalidStreamOutRequest("unsupported schema version")
         }
-        guard source.layoutArtifact.digest.algorithm == .sha256,
+        guard source.layoutArtifact.reference.digest.algorithm == .sha256,
               source.layoutDigest.caseInsensitiveCompare(
-                source.layoutArtifact.digest.hexadecimalValue
+                source.layoutArtifact.reference.digest.hexadecimalValue
               ) == .orderedSame else {
             throw TapeoutArtifactGenerationError.invalidStreamOutRequest(
                 "source layout identity does not match its immutable artifact digest"
             )
         }
-        guard generation.output.location.storage == .workspaceRelative,
-              generation.output.role == .output,
-              generation.output.kind == .layout,
-              generation.output.format == .gdsii || generation.output.format == .oasis else {
+        guard generation.output.descriptor.role == .output,
+              generation.output.descriptor.kind == .layout,
+              generation.output.descriptor.format == .gdsii
+                || generation.output.descriptor.format == .oasis else {
             throw TapeoutArtifactGenerationError.invalidPersistenceTarget(
                 "stream-out must target an output layout in GDSII or OASIS format"
             )
@@ -455,11 +491,12 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
         }
     }
 
-    private func validateHandoffTarget(_ locator: ArtifactLocator) throws {
-        guard locator.location.storage == .workspaceRelative,
-              locator.role == .output,
-              locator.kind == .release,
-              locator.format == .json else {
+    private func validateHandoffTarget(
+        _ destination: ReleaseArtifactDestination
+    ) throws {
+        guard destination.descriptor.role == .output,
+              destination.descriptor.kind == .release,
+              destination.descriptor.format == .json else {
             throw TapeoutArtifactGenerationError.invalidPersistenceTarget(
                 "foundry handoff must target an output release artifact in JSON format"
             )
@@ -467,21 +504,24 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
     }
 
     private func verifyPersistedArtifact(
-        _ artifact: ArtifactReference,
-        expectedLocator: ArtifactLocator,
+        _ artifact: ReleaseArtifactBinding,
+        expectedDestination: ReleaseArtifactDestination,
         expectedBytes: Data,
-        expectedProducer: ProducerIdentity,
         projectRoot: URL
     ) async throws {
-        guard artifact.locator == expectedLocator,
-              artifact.producer == expectedProducer else {
+        guard artifact.reference.descriptor == expectedDestination.descriptor,
+              artifact.availability == .local(
+                artifactID: artifact.reference.id,
+                rootID: expectedDestination.rootID,
+                relativePath: expectedDestination.relativePath
+              ) else {
             throw TapeoutArtifactGenerationError.persistedArtifactMismatch(
-                "returned locator or producer differs from the persistence request"
+                "returned binding differs from the persistence destination"
             )
         }
         let expectedDigest = try SHA256ContentDigester().digest(data: expectedBytes)
-        guard artifact.digest == expectedDigest,
-              artifact.byteCount == UInt64(expectedBytes.count) else {
+        guard artifact.reference.digest == expectedDigest,
+              artifact.reference.byteCount == UInt64(expectedBytes.count) else {
             throw TapeoutArtifactGenerationError.persistedArtifactMismatch("digest or byte count differs from generated bytes")
         }
         let loaded: Data
@@ -496,15 +536,17 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
     }
 
     private func persist(
-        locator: ArtifactLocator,
+        logicalID: String,
+        destination: ReleaseArtifactDestination,
         bytes: Data,
         producer: ProducerIdentity,
         projectRoot: URL
-    ) async throws -> ArtifactReference {
+    ) async throws -> ReleaseArtifactBinding {
         do {
             return try await artifactPersister.persist(
                 ReleaseArtifactPersistenceRequest(
-                    locator: locator,
+                    logicalID: logicalID,
+                    destination: destination,
                     bytes: bytes,
                     producer: producer
                 ),
@@ -517,151 +559,140 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
 
     private func verifyRetainedArtifacts(
         _ request: TapeoutRequest,
+        physicalDesignBinding: ReleaseArtifactBinding,
         projectRoot: URL,
         evaluatedAt: Date,
         add: (String, String, String?, Bool) -> Void
-    ) {
+    ) async {
         let bundle = request.signoffBundle
-        let authorizationIntegrity = verifier.verify(request.authorization, relativeTo: projectRoot)
-        if !authorizationIntegrity.isVerified {
-            add(
-                "RELEASE_AUTHORIZATION_INTEGRITY_FAILED",
-                integrityMessage(authorizationIntegrity),
-                request.authorization.path,
-                true
+        do {
+            let authorizationBytes = try await artifactPersister.load(
+                request.authorizationBinding,
+                relativeTo: projectRoot
             )
-        } else {
-            do {
-                let authorizationURL = try request.authorization.locator.location
-                    .resolvedFileURL(relativeTo: projectRoot)
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .iso8601
-                let authorization = try decoder.decode(
-                    ReleaseAuthorizationResult.self,
-                    from: Data(contentsOf: authorizationURL, options: .mappedIfSafe)
-                )
-                guard authorization.schemaVersion
-                        == ReleaseAuthorizationResult.currentSchemaVersion,
-                      authorization.status == .authorized,
-                      authorization.signoffBundle == request.signoffBundle,
-                      authorization.approval.runID == request.runID,
-                      authorization.approval.stageID == "release.authorization",
-                      authorization.approval.verdict == .approved,
-                      authorization.approval.reviewerKind == .human,
-                      authorization.approval.evidence.stageResult == request.signoffBundle.artifact,
-                      authorization.evidence.provenance.producer
-                        == request.authorization.producer,
-                      authorization.evidence.provenance.inputs.contains(
-                        authorization.approval.evidence.plan
-                      ),
-                      authorization.evidence.provenance.inputs.contains(
-                        request.signoffBundle.artifact
-                      ) else {
-                    add(
-                        "RELEASE_AUTHORIZATION_CONTENT_INVALID",
-                        "The retained authorization must approve this exact signoff bundle through a human-bound, provenance-complete decision.",
-                        request.authorization.path,
-                        true
-                    )
-                    return
-                }
-                let planIntegrity = verifier.verify(
-                    authorization.approval.evidence.plan,
-                    relativeTo: projectRoot
-                )
-                if !planIntegrity.isVerified {
-                    add(
-                        "RELEASE_AUTHORIZATION_APPROVAL_INTEGRITY_FAILED",
-                        integrityMessage(planIntegrity),
-                        authorization.approval.evidence.plan.path,
-                        true
-                    )
-                }
-            } catch {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            let authorization = try decoder.decode(
+                ReleaseAuthorizationResult.self,
+                from: authorizationBytes
+            )
+            let authorizationProducer = authorization.evidence.provenance.producer
+            guard authorization.schemaVersion == ReleaseAuthorizationResult.currentSchemaVersion,
+                  authorization.status == .authorized,
+                  authorization.signoffBundle == request.signoffBundle,
+                  authorization.exactReleaseBundle == request.exactReleaseBundle,
+                  authorization.approval.runID == request.runID,
+                  authorization.approval.stageID == "release.authorization",
+                  authorization.approval.verdict == .approved,
+                  authorization.approval.reviewerKind == .human,
+                  authorization.approval.evidence.stageResult.reference
+                    == request.signoffBundle.artifact.reference,
+                  authorizationProducer.kind == .engine,
+                  authorizationProducer.identifier == "native.release.authorization",
+                  authorization.evidence.provenance.inputs.contains(
+                    authorization.approval.evidence.plan.reference
+                  ),
+                  authorization.evidence.provenance.inputs.contains(
+                    request.signoffBundle.artifact.reference
+                  ) else {
                 add(
-                    "RELEASE_AUTHORIZATION_DECODE_FAILED",
-                    "The retained release authorization result is invalid: \(error.localizedDescription)",
-                    request.authorization.path,
+                    "RELEASE_AUTHORIZATION_CONTENT_INVALID",
+                    "The retained authorization must approve this exact signoff bundle through a human-bound, provenance-complete decision.",
+                    request.authorization.id.description,
                     true
                 )
+                return
             }
+            let planBinding = try ReleaseArtifactBinding(
+                logicalID: authorization.approval.evidence.plan.logicalID,
+                reference: authorization.approval.evidence.plan.reference,
+                availability: authorization.approval.evidence.plan.availability
+            )
+            _ = try await artifactPersister.load(planBinding, relativeTo: projectRoot)
+        } catch {
+            add(
+                "RELEASE_AUTHORIZATION_DECODE_FAILED",
+                "The retained release authorization result is invalid: \(error.localizedDescription)",
+                request.authorization.id.description,
+                true
+            )
         }
-        let bundleIntegrity = verifier.verify(bundle.artifact, relativeTo: projectRoot)
-        if !bundleIntegrity.isVerified {
-            add("SIGNOFF_BUNDLE_INTEGRITY_FAILED", integrityMessage(bundleIntegrity), bundle.artifact.path, true)
-        } else {
+
+        do {
+            let persistedBundle = try SignoffBundle.decodeCanonical(
+                from: try await artifactPersister.load(bundle.artifact, relativeTo: projectRoot)
+            )
+            if persistedBundle.designDigest != bundle.designDigest
+                || persistedBundle.pdkDigest != bundle.pdkDigest
+                || persistedBundle.finalLayoutDigest != bundle.finalLayoutDigest
+                || Set(persistedBundle.evidenceArtifacts) != Set(request.evidence) {
+                add("SIGNOFF_BUNDLE_CONTENT_MISMATCH", "The persisted signoff bundle does not match its release bindings.", bundle.artifact.reference.id.description, true)
+            }
+            let axes = persistedBundle.axisResults.map(\.axis)
+            if axes.count != ReleaseSignoffAxis.allCases.count
+                || Set(axes) != Set(ReleaseSignoffAxis.allCases)
+                || !persistedBundle.axisResults.allSatisfy({ $0.disposition.isReleaseEligible }) {
+                add("SIGNOFF_BUNDLE_AXIS_COVERAGE_INVALID", "The persisted signoff bundle must contain exactly one release-eligible result for every release axis.", bundle.artifact.reference.id.description, true)
+            }
+            if persistedBundle.issuedAt > evaluatedAt {
+                add("SIGNOFF_BUNDLE_TIMESTAMP_INVALID", "The signoff bundle was issued after the tapeout evaluation started.", bundle.artifact.reference.id.description, true)
+            }
+            if !persistedBundle.waiversAreValid(at: evaluatedAt) {
+                add("SIGNOFF_BUNDLE_WAIVER_INVALID", "A signoff waiver is expired, unbound, duplicated, or does not match its waived axis evidence.", bundle.artifact.reference.id.description, true)
+            }
+        } catch {
+            add("SIGNOFF_BUNDLE_DECODE_FAILED", "The persisted signoff bundle is not canonical: \(error.localizedDescription)", bundle.artifact.reference.id.description, true)
+        }
+
+        let retainedBindings = uniqueBindings(
+            request.inputBindings + request.evidenceBindings + [
+                request.authorizationBinding,
+                request.signoffBundle.artifact,
+                request.pdkManifestBinding,
+                physicalDesignBinding,
+            ]
+        )
+        for binding in retainedBindings {
             do {
-                let bundleURL = try bundle.artifact.locator.location.resolvedFileURL(relativeTo: projectRoot)
-                let persistedBundle = try SignoffBundle.decodeCanonical(from: Data(contentsOf: bundleURL, options: .mappedIfSafe))
-                if persistedBundle.designDigest != bundle.designDigest
-                    || persistedBundle.pdkDigest != bundle.pdkDigest
-                    || persistedBundle.finalLayoutDigest != bundle.finalLayoutDigest
-                    || Set(persistedBundle.evidenceArtifacts) != Set(request.evidence) {
-                    add("SIGNOFF_BUNDLE_CONTENT_MISMATCH", "The persisted signoff bundle does not match its release bindings.", bundle.artifact.path, true)
-                }
-                let axes = persistedBundle.axisResults.map(\.axis)
-                if axes.count != ReleaseSignoffAxis.allCases.count
-                    || Set(axes) != Set(ReleaseSignoffAxis.allCases)
-                    || !persistedBundle.axisResults.allSatisfy({ $0.disposition.isReleaseEligible }) {
-                    add(
-                        "SIGNOFF_BUNDLE_AXIS_COVERAGE_INVALID",
-                        "The persisted signoff bundle must contain exactly one release-eligible result for every release axis.",
-                        bundle.artifact.path,
-                        true
-                    )
-                }
-                if persistedBundle.issuedAt > evaluatedAt {
-                    add(
-                        "SIGNOFF_BUNDLE_TIMESTAMP_INVALID",
-                        "The signoff bundle was issued after the tapeout evaluation started.",
-                        bundle.artifact.path,
-                        true
-                    )
-                }
-                if !persistedBundle.waiversAreValid(at: evaluatedAt) {
-                    add(
-                        "SIGNOFF_BUNDLE_WAIVER_INVALID",
-                        "A signoff waiver is expired, unbound, duplicated, or does not match its waived axis evidence.",
-                        bundle.artifact.path,
-                        true
-                    )
-                }
+                _ = try await artifactPersister.load(binding, relativeTo: projectRoot)
             } catch {
-                add("SIGNOFF_BUNDLE_DECODE_FAILED", "The persisted signoff bundle is not canonical: \(error.localizedDescription)", bundle.artifact.path, true)
-            }
-        }
-        let retainedArtifacts = [
-            request.authorization,
-            request.pdk.manifest,
-            request.physicalDesign.layoutArtifact,
-        ] + request.inputs + request.evidence
-        for artifact in Set(retainedArtifacts) {
-            let integrity = verifier.verify(artifact, relativeTo: projectRoot)
-            if !integrity.isVerified {
-                add("HANDOFF_EVIDENCE_INTEGRITY_FAILED", integrityMessage(integrity), artifact.path, true)
+                add("HANDOFF_EVIDENCE_INTEGRITY_FAILED", error.localizedDescription, binding.reference.id.description, true)
             }
         }
     }
 
     private func verifyXORArtifacts(
         _ xorResult: LayoutXORResult?,
+        request: TapeoutRequest,
         projectRoot: URL,
         add: (String, String, String?, Bool) -> Void
-    ) {
-        let retainedArtifacts = xorResult.map(retainedXORArtifacts) ?? []
-        for artifact in Set(retainedArtifacts) {
-            if artifact.producer == nil {
-                add(
-                    "LAYOUT_XOR_QUALIFICATION_PRODUCER_REQUIRED",
-                    "Every retained geometric XOR qualification artifact must identify its producer.",
-                    artifact.path,
-                    true
-                )
-                continue
-            }
-            let integrity = verifier.verify(artifact, relativeTo: projectRoot)
-            if !integrity.isVerified {
-                add("LAYOUT_XOR_QUALIFICATION_INTEGRITY_FAILED", integrityMessage(integrity), artifact.path, true)
+    ) async {
+        guard let xorResult else { return }
+        let retainedReferences = retainedXORArtifacts(xorResult)
+        let candidateBindings = retainedXORBindingCandidates(
+            xorResult,
+            request: request
+        ).filter { retainedReferences.contains($0.reference) }
+        for group in Dictionary(grouping: candidateBindings, by: \.reference).values
+            where Set(group.map(\.availability)).count != 1 {
+            add(
+                "LAYOUT_XOR_ARTIFACT_MATERIALIZATION_CONFLICT",
+                "One retained XOR artifact cannot resolve through multiple materializations.",
+                group.first?.reference.id.description,
+                true
+            )
+            return
+        }
+        let retainedBindings = retainedXORBindings(xorResult, request: request)
+        if Set(retainedBindings.map(\.reference)) != Set(retainedReferences) {
+            add("LAYOUT_XOR_BINDING_INCOMPLETE", "Every retained XOR and qualification artifact requires exact availability.", request.runID, true)
+            return
+        }
+        for binding in retainedBindings {
+            do {
+                _ = try await artifactPersister.load(binding, relativeTo: projectRoot)
+            } catch {
+                add("LAYOUT_XOR_QUALIFICATION_INTEGRITY_FAILED", error.localizedDescription, binding.reference.id.description, true)
             }
         }
     }
@@ -674,6 +705,25 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
                 + $0.outputArtifacts
         } ?? []
         return uniqueArtifacts([result.evidenceArtifact].compactMap { $0 } + qualificationArtifacts)
+    }
+
+    private func retainedXORBindings(
+        _ result: LayoutXORResult,
+        request: TapeoutRequest
+    ) -> [ReleaseArtifactBinding] {
+        let required = Set(retainedXORArtifacts(result))
+        let available = retainedXORBindingCandidates(result, request: request)
+        return uniqueBindings(available.filter { required.contains($0.reference) })
+    }
+
+    private func retainedXORBindingCandidates(
+        _ result: LayoutXORResult,
+        request: TapeoutRequest
+    ) -> [ReleaseArtifactBinding] {
+        result.qualificationBindings
+            + request.inputBindings
+            + request.evidenceBindings
+            + [result.evidenceBinding].compactMap { $0 }
     }
 
     private func isSHA256(_ value: String) -> Bool {
@@ -697,17 +747,25 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
         }
     }
 
-    private func integrityMessage(_ integrity: ArtifactIntegrity) -> String {
-        integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; ")
+    private func uniqueArtifacts(_ artifacts: [ArtifactReference]) -> [ArtifactReference] {
+        Array(Set(artifacts)).sorted { $0.id.description < $1.id.description }
     }
 
-    private func uniqueArtifacts(_ artifacts: [ArtifactReference]) -> [ArtifactReference] {
-        Array(Set(artifacts)).sorted { $0.id.rawValue < $1.id.rawValue }
+    private func uniqueBindings(
+        _ bindings: [ReleaseArtifactBinding]
+    ) -> [ReleaseArtifactBinding] {
+        var byReference: [ArtifactReference: ReleaseArtifactBinding] = [:]
+        for binding in bindings {
+            byReference[binding.reference] = binding
+        }
+        return byReference.values.sorted {
+            $0.reference.id.description < $1.reference.id.description
+        }
     }
 
     private func emptyPayload(_ request: TapeoutRequest) -> TapeoutPayload {
         TapeoutPayload(
-            handoffArtifact: nil,
+            handoffBinding: nil,
             checksum: nil,
             completed: false,
             layoutDigest: request.physicalDesign.layoutDigest,
@@ -719,7 +777,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
         request: TapeoutRequest,
         status: ReleaseExecutionStatus,
         diagnostics: [DesignDiagnostic],
-        artifacts: [ArtifactReference] = [],
+        artifactBindings: [ReleaseArtifactBinding] = [],
         additionalInputs: [ArtifactReference] = [],
         startedAt: Date,
         producer: ProducerIdentity,
@@ -729,9 +787,9 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
             producer: producer,
             inputs: uniqueArtifacts([
                 request.authorization,
-                request.signoffBundle.artifact,
+                request.signoffBundle.artifact.reference,
                 request.pdk.manifest,
-                request.physicalDesign.layoutArtifact,
+                request.physicalDesign.layoutArtifact.reference,
             ] + request.inputs + request.evidence + additionalInputs),
             invocation: ExecutionInvocation.inProcess(
                 entryPoint: "TapeoutEngine.DefaultTapeoutPackaging.execute"
@@ -747,7 +805,7 @@ public struct DefaultTapeoutPackaging: TapeoutPackaging {
             runID: request.runID,
             status: status,
             diagnostics: diagnostics,
-            artifacts: artifacts,
+            artifactBindings: artifactBindings,
             metadata: metadata,
             payload: payload
         )

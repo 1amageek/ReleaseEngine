@@ -1,4 +1,6 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
+import CircuiteFoundationFoundation
 import DesignFlowKernel
 import Foundation
 import PDKCore
@@ -17,8 +19,8 @@ struct TapeoutBehaviorTests {
         defer { fixture.remove() }
 
         let result = await DefaultLayoutXORComparator().compare(
-            source: fixture.request.physicalDesign.layoutArtifact,
-            streamed: fixture.request.physicalDesign.layoutArtifact,
+            source: fixture.layoutBinding,
+            streamed: fixture.layoutBinding,
             pdkDigest: fixture.request.pdk.digest,
             projectRoot: fixture.root
         )
@@ -47,7 +49,12 @@ struct TapeoutBehaviorTests {
         #expect(result.payload.xorResult?.differenceAreaSquareMicrometers == 0)
         #expect(result.payload.xorResult?.rawReportDigest == result.payload.xorResult?.evidenceArtifact?.digest)
         #expect(result.payload.handoff?.isSelfConsistent == true)
-        #expect(result.payload.handoffArtifact?.locator == fixture.request.handoffOutput)
+        let handoffBinding = try #require(result.payload.handoffBinding)
+        #expect(handoffBinding.availability == .local(
+            artifactID: handoffBinding.reference.id,
+            rootID: fixture.request.handoffOutput.rootID,
+            relativePath: fixture.request.handoffOutput.relativePath
+        ))
         #expect(Set(result.provenance.inputs).isSuperset(of: Set(fixture.request.inputs)))
         let xorQualification = try #require(result.payload.xorResult?.processQualification)
         let qualificationArtifacts = xorQualification.identityArtifacts.all
@@ -85,20 +92,6 @@ struct TapeoutBehaviorTests {
             try FoundryHandoffManifest.decodeCanonical(from: duplicated.canonicalData())
         }
 
-        let original = try #require(retained.artifacts.first)
-        let producerless = ArtifactReference(
-            id: original.id,
-            locator: original.locator,
-            digest: original.digest,
-            byteCount: original.byteCount
-        )
-        var missingProducer = retained
-        missingProducer.artifacts[0] = producerless
-        missingProducer.manifestDigest = try missingProducer.computedManifestDigest()
-        #expect(missingProducer.isSelfConsistent == false)
-        #expect(throws: FoundryHandoffManifestError.self) {
-            try FoundryHandoffManifest.decodeCanonical(from: missingProducer.canonicalData())
-        }
     }
 
     @Test("geometric differences fail tapeout and retain typed XOR metrics")
@@ -112,7 +105,8 @@ struct TapeoutBehaviorTests {
         )
         let comparator = QualifiedGeometricXORExecutor(
             configuration: try fixture.geometricXORConfiguration(
-                qualification: qualification.processQualification
+                qualification: qualification.processQualification,
+                bindings: Array(qualification.artifactBindingsByID.values)
             ),
             artifactPersister: fixture.store,
             processRunner: DifferenceReportingProcessRunner(),
@@ -143,7 +137,8 @@ struct TapeoutBehaviorTests {
         )
         let comparator = QualifiedGeometricXORExecutor(
             configuration: try fixture.geometricXORConfiguration(
-                qualification: qualification.processQualification
+                qualification: qualification.processQualification,
+                bindings: Array(qualification.artifactBindingsByID.values)
             ),
             artifactPersister: fixture.store,
             processRunner: UnexpectedProcessRunner(),
@@ -171,9 +166,10 @@ struct TapeoutBehaviorTests {
             toolID: "qualified-layout-xor"
         )
         let configuration = try fixture.geometricXORConfiguration(
-            qualification: qualification.processQualification
+            qualification: qualification.processQualification,
+            bindings: Array(qualification.artifactBindingsByID.values)
         )
-        let source = fixture.request.physicalDesign.layoutArtifact
+        let source = fixture.layoutBinding
 
         let timeout = await QualifiedGeometricXORExecutor(
             configuration: configuration,
@@ -219,6 +215,27 @@ struct TapeoutBehaviorTests {
         #expect(nonzeroExit.exitCode == 23)
     }
 
+    @Test("geometric XOR configuration requires every qualification artifact binding")
+    func geometricXORRequiresExactQualificationBindings() async throws {
+        let fixture = try TapeoutFixture()
+        defer { fixture.remove() }
+        let qualification = try await ProductionTrustFixture(
+            root: fixture.root,
+            evaluatedAt: fixture.generatedAt,
+            toolID: "qualified-layout-xor"
+        )
+
+        #expect(
+            throws: GeometricXORToolConfigurationError
+                .qualificationBindingInventoryMismatch
+        ) {
+            try fixture.geometricXORConfiguration(
+                qualification: qualification.processQualification,
+                bindings: []
+            )
+        }
+    }
+
     @Test("missing project root blocks integrity verification")
     func missingIntegrityContext() async throws {
         let fixture = try TapeoutFixture()
@@ -226,15 +243,17 @@ struct TapeoutBehaviorTests {
         let original = fixture.request
         let request = TapeoutRequest(
             runID: original.runID,
-            inputs: original.inputs,
+            inputBindings: original.inputBindings,
             signoffBundle: original.signoffBundle,
-            authorization: original.authorization,
+            exactReleaseBundle: original.exactReleaseBundle,
+            authorizationBinding: original.authorizationBinding,
             physicalDesign: original.physicalDesign,
             pdk: original.pdk,
+            pdkManifestBinding: original.pdkManifestBinding,
             streamOut: original.streamOut,
             foundryID: original.foundryID,
             handoffOutput: original.handoffOutput,
-            evidence: original.evidence
+            evidenceBindings: original.evidenceBindings
         )
 
         let result = try await DefaultTapeoutPackaging(
@@ -254,10 +273,11 @@ struct TapeoutBehaviorTests {
             evaluatedAt: fixture.generatedAt,
             toolID: "qualified-layout-xor"
         )
-        let source = fixture.request.physicalDesign.layoutArtifact
+        let source = fixture.layoutBinding
         let result = await QualifiedGeometricXORExecutor(
             configuration: try fixture.geometricXORConfiguration(
-                qualification: qualification.processQualification
+                qualification: qualification.processQualification,
+                bindings: Array(qualification.artifactBindingsByID.values)
             ),
             artifactPersister: fixture.store,
             processRunner: InputMutatingProcessRunner(),
@@ -284,13 +304,14 @@ struct TapeoutBehaviorTests {
             evaluatedAt: fixture.generatedAt,
             toolID: "qualified-layout-xor"
         )
-        let source = fixture.request.physicalDesign.layoutArtifact
-        let originalURL = try source.locator.location.resolvedFileURL(
-            relativeTo: fixture.root
+        let source = fixture.layoutBinding
+        let originalURL = fixture.root.appending(
+            path: try fixture.relativePath(for: source).stringValue
         )
         let result = await QualifiedGeometricXORExecutor(
             configuration: try fixture.geometricXORConfiguration(
-                qualification: qualification.processQualification
+                qualification: qualification.processQualification,
+                bindings: Array(qualification.artifactBindingsByID.values)
             ),
             artifactPersister: fixture.store,
             processRunner: SnapshotPathAssertingProcessRunner(originalURL: originalURL),
@@ -304,7 +325,11 @@ struct TapeoutBehaviorTests {
 
         #expect(result.status == .passed)
         #expect(result.executionStatus == .completed)
-        #expect(LocalArtifactVerifier().verify(source, relativeTo: fixture.root).isVerified)
+        let retainedSource = try await fixture.store.load(
+            source,
+            relativeTo: fixture.root
+        )
+        #expect(try SHA256ContentDigester().digest(data: retainedSource) == source.reference.digest)
     }
 
     @Test("immutable artifact persistence serializes concurrent stream writers")
@@ -342,14 +367,13 @@ struct TapeoutBehaviorTests {
             }
         }
         let store = LocalReleaseArtifactStore()
-        let locator = ArtifactLocator(
-            location: try ArtifactLocation(workspaceRelativePath: "release/immutable.json"),
-            role: .output,
-            kind: .release,
-            format: .json
-        )
         let request = ReleaseArtifactPersistenceRequest(
-            locator: locator,
+            logicalID: "immutable-release",
+            destination: try Self.destination(
+                path: ["release", "immutable.json"],
+                kind: .release,
+                format: .json
+            ),
             bytes: Data("{}".utf8),
             producer: try ProducerIdentity(kind: .engine, identifier: "test.release", version: "1.0.0")
         )
@@ -385,9 +409,9 @@ struct TapeoutBehaviorTests {
             withDestinationURL: outside
         )
         let request = ReleaseArtifactPersistenceRequest(
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: "escape/release.json"),
-                role: .output,
+            logicalID: "escaped-release",
+            destination: try Self.destination(
+                path: ["escape", "release.json"],
                 kind: .release,
                 format: .json
             ),
@@ -405,67 +429,30 @@ struct TapeoutBehaviorTests {
         #expect(!FileManager.default.fileExists(atPath: outside.appending(path: "release.json").path))
     }
 
-    @Test("tapeout rejects a persisted artifact with substituted producer provenance")
-    func rejectsPersistedProducerSubstitution() async throws {
-        let fixture = try TapeoutFixture()
-        defer { fixture.remove() }
-
-        let result = try await DefaultTapeoutPackaging(
-            artifactPersister: ProducerSubstitutingArtifactStore(),
-            now: { fixture.generatedAt }
-        ).execute(fixture.request)
-
-        #expect(result.status == .blocked)
-        #expect(result.diagnostics.contains {
-            $0.code.rawValue == "STREAM_OUT_PERSISTENCE_BLOCKED"
-        })
-    }
-
-    @Test("tapeout rejects an absolute stream output outside the project")
-    func rejectsAbsoluteStreamOutput() async throws {
-        let fixture = try TapeoutFixture()
-        defer { fixture.remove() }
-        let original = fixture.request
-        let generation = original.streamOut
+    @Test("artifact destinations reject absolute paths before tapeout execution")
+    func rejectsAbsoluteStreamOutput() throws {
         let outside = FileManager.default.temporaryDirectory
             .appending(path: "outside-\(UUID().uuidString).gds")
-        let request = TapeoutRequest(
-            runID: original.runID,
-            inputs: original.inputs,
-            signoffBundle: original.signoffBundle,
-            authorization: original.authorization,
-            physicalDesign: original.physicalDesign,
-            pdk: original.pdk,
-            streamOut: StreamOutGenerationRequest(
-                output: ArtifactLocator(
-                    location: try ArtifactLocation(fileURL: outside),
-                    role: generation.output.role,
-                    kind: generation.output.kind,
-                    format: generation.output.format
-                ),
-                topCell: generation.topCell,
-                unitsPerDatabaseUnit: generation.unitsPerDatabaseUnit,
-                layerMap: generation.layerMap,
-                hierarchyDepth: generation.hierarchyDepth,
-                seal: generation.seal,
-                padCells: generation.padCells,
-                generatorID: generation.generatorID,
-                generatorVersion: generation.generatorVersion,
-                requirements: generation.requirements
-            ),
-            foundryID: original.foundryID,
-            projectRoot: original.projectRoot,
-            handoffOutput: original.handoffOutput,
-            evidence: original.evidence
-        )
-
-        let result = try await DefaultTapeoutPackaging(
-            artifactPersister: fixture.store
-        ).execute(request)
-
-        #expect(result.status == .blocked)
-        #expect(result.diagnostics.contains { $0.code.rawValue == "STREAM_OUT_TARGET_INVALID" })
+        #expect(throws: ArtifactRelativePathError.self) {
+            try ArtifactRelativePath(segments: [outside.path])
+        }
         #expect(!FileManager.default.fileExists(atPath: outside.path))
+    }
+
+    private static func destination(
+        path: [String],
+        kind: ArtifactKind,
+        format: ArtifactFormat
+    ) throws -> ReleaseArtifactDestination {
+        ReleaseArtifactDestination(
+            rootID: try ArtifactRootID(rawValue: "tapeout-test-root"),
+            relativePath: try ArtifactRelativePath(segments: path),
+            descriptor: ArtifactDescriptor(
+                role: .output,
+                kind: kind,
+                format: format
+            )
+        )
     }
 
     @Test("tapeout rejects a PDK digest that does not identify its manifest")
@@ -488,7 +475,7 @@ struct TapeoutBehaviorTests {
         let fixture = try TapeoutFixture()
         defer { fixture.remove() }
         var request = fixture.request
-        request.evidence = []
+        request.evidenceBindings = []
 
         let result = try await DefaultTapeoutPackaging(
             artifactPersister: fixture.store
@@ -513,7 +500,10 @@ private func attemptPersistence(
         return error
     } catch {
         Issue.record("Unexpected immutable persistence error: \(error.localizedDescription)")
-        return .writeFailed(path: request.locator.location.value, stage: .contentWrite)
+        return .writeFailed(
+            path: request.destination.relativePath.stringValue,
+            stage: .contentWrite
+        )
     }
 }
 
@@ -521,6 +511,7 @@ private struct TapeoutFixture {
     let root: URL
     let generatedAt = Date(timeIntervalSince1970: 2_000)
     let store = TestReleaseArtifactStore()
+    let layoutBinding: ReleaseArtifactBinding
     let request: TapeoutRequest
 
     init() throws {
@@ -528,56 +519,40 @@ private struct TapeoutFixture {
             .appending(path: "tapeout-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let designDigest = String(repeating: "1", count: 64)
-        let physicalProducer = try ProducerIdentity(
-            kind: .engine,
-            identifier: "physical-design",
-            version: "1.0.0"
-        )
-        let pdkProducer = try ProducerIdentity(
-            kind: .library,
-            identifier: "pdk-kit",
-            version: "1.0.0"
-        )
         let layout = try Self.write(
             Data([0, 6, 0, 2, 0, 4, 0, 0, 0, 0]),
             path: "layout/top.gds",
             kind: .layout,
             format: .gdsii,
-            root: root,
-            producer: physicalProducer
+            root: root
         )
+        layoutBinding = layout
         let pdkManifest = try Self.write(
             Data("pdk".utf8),
             path: "pdk/manifest.json",
             kind: .technology,
             format: .json,
-            root: root,
-            producer: pdkProducer
+            root: root
         )
-        let pdkDigest = pdkManifest.digest.hexadecimalValue
+        let pdkDigest = pdkManifest.reference.digest.hexadecimalValue
         let report = try Self.write(
             Data("report".utf8),
             path: "reports/drc.json",
             kind: .report,
             format: .json,
-            root: root,
-            producer: try ProducerIdentity(
-                kind: .tool,
-                identifier: "signoff-tool",
-                version: "1.0.0"
-            )
+            root: root
         )
         let bundle = SignoffBundle(
             bundleID: "bundle",
             profileID: "digital",
             designDigest: designDigest,
             pdkDigest: pdkDigest,
-            finalLayoutDigest: layout.digest.hexadecimalValue,
+            finalLayoutDigest: layout.reference.digest.hexadecimalValue,
             axisResults: ReleaseSignoffAxis.allCases.map {
                 SignoffAxisResult(axis: $0, disposition: .passed, evidenceIDs: ["e-\($0.rawValue)"], reason: "passed")
             },
             waivers: [],
-            evidenceArtifacts: [report],
+            evidenceArtifacts: [report.reference],
             toolQualificationScopes: [ToolQualificationScope(
                 implementationID: "signoff-tool",
                 toolVersion: "1.0.0",
@@ -602,25 +577,14 @@ private struct TapeoutFixture {
             path: "release/signoff.json",
             kind: .release,
             format: .json,
-            root: root,
-            producer: try ProducerIdentity(
-                kind: .engine,
-                identifier: "native.release.signoff",
-                version: "2.0.0",
-                build: String(repeating: "a", count: 64)
-            )
+            root: root
         )
         let planArtifact = try Self.write(
             Data("approved release plan".utf8),
             path: "release/plan.json",
             kind: .request,
             format: .json,
-            root: root,
-            producer: try ProducerIdentity(
-                kind: .engine,
-                identifier: "design-flow-kernel",
-                version: "1.0.0"
-            )
+            root: root
         )
         let approval = FlowApprovalRecord(
             runID: "tapeout",
@@ -630,8 +594,14 @@ private struct TapeoutFixture {
             reviewerKind: .human,
             createdAt: generatedAt.addingTimeInterval(-0.5),
             evidence: FlowApprovalEvidenceBinding(
-                plan: planArtifact,
-                stageResult: bundleArtifact
+                plan: try Self.flowBinding(
+                    planArtifact,
+                    logicalID: "release-plan"
+                ),
+                stageResult: try Self.flowBinding(
+                    bundleArtifact,
+                    logicalID: "signoff-stage-result"
+                )
             )
         )
         let authorizationProducer = try ProducerIdentity(
@@ -640,19 +610,39 @@ private struct TapeoutFixture {
             version: "2.0.0",
             build: String(repeating: "b", count: 64)
         )
-        let authorization = ReleaseAuthorizationResult(
+        let exactReleaseBundle = try makeTestReleaseExactBundle(
+            contentArtifacts: [
+                bundleArtifact.reference,
+                planArtifact.reference,
+                pdkManifest.reference,
+                layout.reference,
+                report.reference,
+            ],
+            approvalArtifacts: [
+                planArtifact.reference,
+                bundleArtifact.reference,
+            ],
+            qualificationArtifacts: [report.reference]
+        )
+        let signoffReference = SignoffBundleReference(
+            artifact: bundleArtifact,
+            designDigest: designDigest,
+            pdkDigest: pdkDigest,
+            finalLayoutDigest: layout.reference.digest.hexadecimalValue
+        )
+        let authorization = try ReleaseAuthorizationResult(
             status: .authorized,
-            signoffBundle: SignoffBundleReference(
-                artifact: bundleArtifact,
-                designDigest: designDigest,
-                pdkDigest: pdkDigest,
-                finalLayoutDigest: layout.digest.hexadecimalValue
-            ),
+            signoffBundle: signoffReference,
+            exactReleaseBundle: exactReleaseBundle,
             approval: approval,
             diagnostics: [],
             provenance: try ExecutionProvenance(
                 producer: authorizationProducer,
-                inputs: [bundleArtifact, planArtifact, report],
+                inputs: [
+                    bundleArtifact.reference,
+                    planArtifact.reference,
+                    report.reference,
+                ],
                 startedAt: generatedAt.addingTimeInterval(-0.5),
                 completedAt: generatedAt.addingTimeInterval(-0.25)
             )
@@ -665,15 +655,32 @@ private struct TapeoutFixture {
             path: "release/authorization.json",
             kind: .report,
             format: .json,
-            root: root,
-            producer: authorizationProducer
+            root: root
+        )
+        let physicalLayout = try PhysicalDesignArtifactBinding(
+            logicalID: layout.logicalID,
+            reference: layout.reference,
+            availability: layout.availability
         )
         let physical = PhysicalDesignReference(
-            layoutArtifact: layout,
+            layoutArtifact: physicalLayout,
             topCell: "TOP",
-            layoutDigest: layout.digest.hexadecimalValue
+            layoutDigest: layout.reference.digest.hexadecimalValue
         )
-        let pdk = PDKReference(manifest: pdkManifest, processID: "process", version: "1", digest: pdkDigest)
+        let pdk = PDKReference(
+            manifest: pdkManifest.reference,
+            manifestLocator: ArtifactLocator(
+                location: try ArtifactLocation(
+                    workspaceRelativePath: "pdk/manifest.json"
+                ),
+                role: pdkManifest.reference.descriptor.role,
+                kind: pdkManifest.reference.descriptor.kind,
+                format: pdkManifest.reference.descriptor.format
+            ),
+            processID: "process",
+            version: "1",
+            digest: pdkDigest
+        )
         let requirements = TapeoutReleaseRequirements(
             expectedTopCell: "TOP",
             expectedUnitsPerDatabaseUnit: 0.001,
@@ -682,9 +689,8 @@ private struct TapeoutFixture {
             requiredSeal: "seal"
         )
         let streamOut = StreamOutGenerationRequest(
-            output: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: "release/top.gds"),
-                role: .output,
+            output: try Self.destination(
+                path: ["release", "top.gds"],
                 kind: .layout,
                 format: .gdsii
             ),
@@ -700,26 +706,28 @@ private struct TapeoutFixture {
         )
         request = TapeoutRequest(
             runID: "tapeout",
-            inputs: [authorizationArtifact, bundleArtifact, pdkManifest, layout, report],
-            signoffBundle: SignoffBundleReference(
-                artifact: bundleArtifact,
-                designDigest: designDigest,
-                pdkDigest: pdkDigest,
-                finalLayoutDigest: layout.digest.hexadecimalValue
-            ),
-            authorization: authorizationArtifact,
+            inputBindings: [
+                authorizationArtifact,
+                bundleArtifact,
+                pdkManifest,
+                layout,
+                report,
+            ],
+            signoffBundle: signoffReference,
+            exactReleaseBundle: exactReleaseBundle,
+            authorizationBinding: authorizationArtifact,
             physicalDesign: physical,
             pdk: pdk,
+            pdkManifestBinding: pdkManifest,
             streamOut: streamOut,
             foundryID: "foundry",
             projectRoot: root.path,
-            handoffOutput: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: "release/handoff.json"),
-                role: .output,
+            handoffOutput: try Self.destination(
+                path: ["release", "handoff.json"],
                 kind: .release,
                 format: .json
             ),
-            evidence: [report]
+            evidenceBindings: [report]
         )
     }
 
@@ -739,7 +747,8 @@ private struct TapeoutFixture {
         )
         return QualifiedGeometricXORExecutor(
             configuration: try geometricXORConfiguration(
-                qualification: qualification.processQualification
+                qualification: qualification.processQualification,
+                bindings: Array(qualification.artifactBindingsByID.values)
             ),
             artifactPersister: store,
             now: { generatedAt }
@@ -747,19 +756,35 @@ private struct TapeoutFixture {
     }
 
     func geometricXORConfiguration(
-        qualification: ToolProcessQualificationEvidence
+        qualification: ToolProcessQualificationEvidence,
+        bindings: [ReleaseArtifactBinding]
     ) throws -> GeometricXORToolConfiguration {
-        try GeometricXORToolConfiguration(
+        let requiredArtifacts = Set(
+            qualification.identityArtifacts.all
+                + qualification.evidenceArtifacts
+                + qualification.inputArtifacts
+                + qualification.outputArtifacts
+        )
+        return try GeometricXORToolConfiguration(
             qualification: qualification,
-            reportOutput: ArtifactLocator(
-                location: try ArtifactLocation(
-                    workspaceRelativePath: "release/layout-xor-report.json"
-                ),
-                role: .output,
+            qualificationBindings: bindings.filter {
+                requiredArtifacts.contains($0.reference)
+            },
+            reportOutput: try Self.destination(
+                path: ["release", "layout-xor-report.json"],
                 kind: .report,
                 format: .json
             )
         )
+    }
+
+    func relativePath(for binding: ReleaseArtifactBinding) throws -> ArtifactRelativePath {
+        guard case .local(_, _, let relativePath) = binding.availability else {
+            throw FlowArtifactBindingError.localAvailabilityRequired(
+                logicalID: binding.logicalID
+            )
+        }
+        return relativePath
     }
 
     private static func write(
@@ -767,21 +792,58 @@ private struct TapeoutFixture {
         path: String,
         kind: ArtifactKind,
         format: ArtifactFormat,
-        root: URL,
-        producer: ProducerIdentity? = nil
-    ) throws -> ArtifactReference {
+        root: URL
+    ) throws -> ReleaseArtifactBinding {
         let url = root.appending(path: path)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
-        return try LocalArtifactReferencer().reference(
-            ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: path),
+        let reference = try ArtifactReference(
+            digest: SHA256ContentDigester().digest(data: data),
+            byteCount: UInt64(data.count),
+            descriptor: ArtifactDescriptor(
                 role: .output,
                 kind: kind,
                 format: format
-            ),
-            relativeTo: root,
-            producer: producer
+            )
+        )
+        let relativePath = try ArtifactRelativePath(
+            segments: path.split(separator: "/").map(String.init)
+        )
+        return try ReleaseArtifactBinding(
+            logicalID: path.replacingOccurrences(of: "/", with: "."),
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: try ArtifactRootID(rawValue: "tapeout-test-root"),
+                relativePath: relativePath
+            )
+        )
+    }
+
+    private static func flowBinding(
+        _ binding: ReleaseArtifactBinding,
+        logicalID: String
+    ) throws -> FlowArtifactBinding {
+        try FlowArtifactBinding(
+            logicalID: logicalID,
+            reference: binding.reference,
+            availability: binding.availability
+        )
+    }
+
+    private static func destination(
+        path: [String],
+        kind: ArtifactKind,
+        format: ArtifactFormat
+    ) throws -> ReleaseArtifactDestination {
+        ReleaseArtifactDestination(
+            rootID: try ArtifactRootID(rawValue: "tapeout-test-root"),
+            relativePath: try ArtifactRelativePath(segments: path),
+            descriptor: ArtifactDescriptor(
+                role: .output,
+                kind: kind,
+                format: format
+            )
         )
     }
 }
@@ -918,58 +980,17 @@ private struct NonzeroExitProcessRunner: TimedProcessRunning {
 }
 
 private actor TestReleaseArtifactStore: ReleaseArtifactPersisting {
-    func persist(
-        _ request: ReleaseArtifactPersistenceRequest,
-        relativeTo projectRoot: URL
-    ) async throws -> ArtifactReference {
-        let url = try request.locator.location.resolvedFileURL(relativeTo: projectRoot)
-        guard !FileManager.default.fileExists(atPath: url.path) else {
-            throw TapeoutArtifactGenerationError.persistenceFailed("the immutable target already exists")
-        }
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try request.bytes.write(to: url, options: .withoutOverwriting)
-        return try LocalArtifactReferencer().reference(
-            request.locator,
-            relativeTo: projectRoot,
-            producer: request.producer
-        )
-    }
-
-    func load(
-        _ artifact: ArtifactReference,
-        relativeTo projectRoot: URL
-    ) async throws -> Data {
-        let url = try artifact.locator.location.resolvedFileURL(relativeTo: projectRoot)
-        return try Data(contentsOf: url, options: .mappedIfSafe)
-    }
-}
-
-private actor ProducerSubstitutingArtifactStore: ReleaseArtifactPersisting {
-    private let store = TestReleaseArtifactStore()
+    private let store = LocalReleaseArtifactStore()
 
     func persist(
         _ request: ReleaseArtifactPersistenceRequest,
         relativeTo projectRoot: URL
-    ) async throws -> ArtifactReference {
-        let artifact = try await store.persist(request, relativeTo: projectRoot)
-        return ArtifactReference(
-            id: artifact.id,
-            locator: artifact.locator,
-            digest: artifact.digest,
-            byteCount: artifact.byteCount,
-            producer: try ProducerIdentity(
-                kind: .engine,
-                identifier: "substituted.release.producer",
-                version: "1.0.0"
-            )
-        )
+    ) async throws -> ReleaseArtifactBinding {
+        try await store.persist(request, relativeTo: projectRoot)
     }
 
     func load(
-        _ artifact: ArtifactReference,
+        _ artifact: ReleaseArtifactBinding,
         relativeTo projectRoot: URL
     ) async throws -> Data {
         try await store.load(artifact, relativeTo: projectRoot)

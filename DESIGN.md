@@ -19,7 +19,7 @@ ReleaseEngine turns immutable domain evidence into three distinct outputs: a sig
 ## Artifact invariants
 
 - Signoff and handoff JSON must be canonical byte-for-byte.
-- Signoff generates its bundle from validated typed evidence; callers provide only an immutable output locator, never precomputed bundle bytes.
+- Signoff generates its bundle from validated typed evidence; callers provide only an immutable `ReleaseArtifactDestination`, never precomputed bundle bytes.
 - `ArtifactReference` digest and byte count are verified before decoding.
 - Production signoff contains exactly one result for every `ReleaseSignoffAxis`.
 - Missing, duplicate, failed, or blocked axes reject authorization.
@@ -37,4 +37,8 @@ ReleaseEngine turns immutable domain evidence into three distinct outputs: a sig
 - `QualifiedGeometricXORExecutor` directly launches the executable retained by `ToolProcessQualificationEvidence`; it records the exact executable, arguments, working directory, sanitized environment digest, exit state, difference count/area, and raw report digest. ReleaseEngine consumes qualification evidence and never self-qualifies the tool.
 - The foundry handoff schema embeds the complete typed `LayoutXORResult`; its manifest digest covers that result and its immutable report artifact.
 - `ReleaseArtifactPersisting` must serialize conflicting writers, reject replacement, and reload exact bytes for verification.
+- Artifact content identity is location-independent. Availability is carried only by `ReleaseArtifactBinding`, and local reads use bounded root-capability sessions with integrity and close verification.
+- Exact release inventory is derived by `DefaultReleaseExactBundleBuilder`; authorization requires exact equality for content, approval, qualification, database revision, dependency-graph, and active retention inventories.
+- Persisted `ReleaseAuthorizationResult` values are accepted only after schema, status/payload, human approval, artifact projection, provenance, diagnostics, and evidence-manifest consistency are revalidated during decoding.
+- Qualified XOR configuration requires exactly one non-conflicting binding for every artifact named by its production qualification. Those bindings remain attached to `LayoutXORResult` through handoff read-back.
 - The default encoder only copies an already-standard GDSII or OASIS stream. Any format conversion requires a separately qualified `LayoutStreamEncoding` implementation.

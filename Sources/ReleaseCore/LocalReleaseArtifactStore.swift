@@ -1,5 +1,8 @@
 import Foundation
 import CircuiteFoundation
+import CircuiteFoundationCrypto
+import CircuiteFoundationFileSystem
+import CircuiteFoundationFoundation
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -8,60 +11,204 @@ import Glibc
 
 /// A project-relative immutable artifact store for standalone use.
 public actor LocalReleaseArtifactStore: ReleaseArtifactPersisting {
-    public init() {}
+    public static let defaultReadBudget: ArtifactAccessBudget = {
+        do {
+            return try ArtifactAccessBudget(
+                maximumPageByteCount: 1_048_576,
+                maximumTotalByteCount: 1_073_741_824,
+                maximumPageCount: 1_024,
+                maximumWorkUnitCount: 4_096,
+                maximumDurationNanoseconds: 60_000_000_000
+            )
+        } catch {
+            preconditionFailure("The release artifact read budget is invalid: \(error)")
+        }
+    }()
+
+    private let readBudget: ArtifactAccessBudget
+
+    public init(
+        readBudget: ArtifactAccessBudget = LocalReleaseArtifactStore.defaultReadBudget
+    ) {
+        self.readBudget = readBudget
+    }
 
     public func persist(
         _ request: ReleaseArtifactPersistenceRequest,
         relativeTo projectRoot: URL
-    ) async throws -> ArtifactReference {
-        guard request.locator.location.storage == .workspaceRelative else {
-            throw LocalReleaseArtifactStoreError.invalidLocation(request.locator.location.value)
-        }
+    ) async throws -> ReleaseArtifactBinding {
+        let path = request.destination.relativePath.stringValue
         let digest: ContentDigest
         do {
             digest = try SHA256ContentDigester().digest(data: request.bytes)
         } catch {
             throw LocalReleaseArtifactStoreError.writeFailed(
-                path: request.locator.location.value,
+                path: path,
                 stage: .contentWrite
             )
         }
         try persistAtomically(
             request.bytes,
-            path: request.locator.location.value,
+            path: path,
             projectRoot: projectRoot
         )
-        return ArtifactReference(
-            locator: request.locator,
+        let reference = try ArtifactReference(
             digest: digest,
             byteCount: UInt64(request.bytes.count),
-            producer: request.producer
+            descriptor: request.destination.descriptor
+        )
+        return try ReleaseArtifactBinding(
+            logicalID: request.logicalID,
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: request.destination.rootID,
+                relativePath: request.destination.relativePath
+            )
         )
     }
 
     public func load(
-        _ artifact: ArtifactReference,
+        _ artifact: ReleaseArtifactBinding,
         relativeTo projectRoot: URL
     ) async throws -> Data {
-        guard artifact.locator.location.storage == .workspaceRelative else {
-            throw LocalReleaseArtifactStoreError.invalidLocation(artifact.locator.location.value)
+        guard case .local(_, let rootID, let relativePath) = artifact.availability else {
+            throw LocalReleaseArtifactStoreError.invalidLocation(
+                artifact.materializationDescription
+            )
+        }
+        let path = relativePath.stringValue
+        let access: ArtifactRootCapability
+        do {
+            access = try ArtifactRootCapability(
+                rootID: rootID,
+                directoryURL: projectRoot,
+                digester: SHA256ContentDigester()
+            )
+        } catch {
+            throw LocalReleaseArtifactStoreError.invalidLocation(path)
+        }
+
+        let data: Data
+        do {
+            data = try await read(
+                artifact,
+                path: path,
+                using: access
+            )
+        } catch let primaryError {
+            do {
+                try await access.close().wait()
+            } catch let closeError {
+                throw LocalReleaseArtifactStoreError.readCleanupFailed(
+                    path: path,
+                    primaryReason: String(describing: primaryError),
+                    closeReason: String(describing: closeError)
+                )
+            }
+            if let localError = primaryError as? LocalReleaseArtifactStoreError {
+                throw localError
+            }
+            throw LocalReleaseArtifactStoreError.readFailed(path)
         }
         do {
-            let data = try readSecurely(
-                path: artifact.path,
-                expectedByteCount: artifact.byteCount,
-                projectRoot: projectRoot
-            )
-            guard artifact.byteCount == UInt64(data.count),
-                  try SHA256ContentDigester().digest(data: data) == artifact.digest else {
-                throw LocalReleaseArtifactStoreError.readFailed(artifact.path)
-            }
-            return data
-        } catch let error as LocalReleaseArtifactStoreError {
-            throw error
+            try await access.close().wait()
         } catch {
-            throw LocalReleaseArtifactStoreError.readFailed(artifact.path)
+            throw LocalReleaseArtifactStoreError.readCleanupFailed(
+                path: path,
+                primaryReason: nil,
+                closeReason: String(describing: error)
+            )
         }
+        return data
+    }
+
+    private func read(
+        _ artifact: ReleaseArtifactBinding,
+        path: String,
+        using access: ArtifactRootCapability
+    ) async throws -> Data {
+        let intent: ArtifactAccessIntent
+        do {
+            intent = try ArtifactAccessIntent(
+                expectedReference: artifact.reference,
+                availability: artifact.availability,
+                operation: .read,
+                budget: readBudget
+            )
+        } catch {
+            throw LocalReleaseArtifactStoreError.invalidLocation(path)
+        }
+
+        let session: any ArtifactReadSession
+        do {
+            session = try await access.open(intent)
+        } catch let accessError {
+            throw Self.mapAccessError(accessError, path: path)
+        }
+
+        var data = Data()
+        if artifact.reference.byteCount <= UInt64(Int.max) {
+            data.reserveCapacity(Int(artifact.reference.byteCount))
+        }
+        do {
+            var offset: UInt64 = 0
+            while true {
+                let page = try await session.readPage(
+                    ArtifactReadPageRequest(
+                        offset: offset,
+                        maximumByteCount: readBudget.maximumPageByteCount
+                    )
+                )
+                page.bytes.withUnsafeBytes { bytes in
+                    data.append(contentsOf: bytes)
+                }
+                offset = page.cumulativeByteCount
+                if page.completion == .complete {
+                    guard page.finalReceipt?.observedArtifactID
+                            == artifact.reference.id,
+                          page.finalReceipt?.totalByteCount
+                            == artifact.reference.byteCount else {
+                        throw LocalReleaseArtifactStoreError.readIntegrityFailed(path)
+                    }
+                    break
+                }
+            }
+        } catch let primaryError {
+            do {
+                _ = try await session.close().wait()
+            } catch let closeError {
+                throw LocalReleaseArtifactStoreError.readCleanupFailed(
+                    path: path,
+                    primaryReason: String(describing: primaryError),
+                    closeReason: String(describing: closeError)
+                )
+            }
+            if let localError = primaryError as? LocalReleaseArtifactStoreError {
+                throw localError
+            }
+            if let accessError = primaryError as? ArtifactAccessError {
+                throw Self.mapAccessError(accessError, path: path)
+            }
+            throw LocalReleaseArtifactStoreError.readFailed(path)
+        }
+
+        do {
+            let receipt = try await session.close().wait()
+            guard receipt.sessionIdentity == session.identity,
+                  receipt.didReachTerminalPage else {
+                throw LocalReleaseArtifactStoreError.readFailed(path)
+            }
+        } catch let localError as LocalReleaseArtifactStoreError {
+            throw localError
+        } catch {
+            throw LocalReleaseArtifactStoreError.readCleanupFailed(
+                path: path,
+                primaryReason: nil,
+                closeReason: String(describing: error)
+            )
+        }
+        return data
     }
 
     private func persistAtomically(_ data: Data, path: String, projectRoot: URL) throws {
@@ -167,49 +314,47 @@ public actor LocalReleaseArtifactStore: ReleaseArtifactPersisting {
             return stage
         case .targetAlreadyExists:
             return .publication
-        case .invalidLocation, .readFailed:
+        case .invalidLocation, .readFailed, .readBudgetExceeded,
+                .readIntegrityFailed, .readCancelled, .readCleanupFailed:
             return .contentWrite
         }
     }
 
-    private func readSecurely(
-        path: String,
-        expectedByteCount: UInt64,
-        projectRoot: URL
-    ) throws -> Data {
-        let parent = try openParentDirectory(path: path, projectRoot: projectRoot, create: false)
-        defer { systemClose(parent.descriptor) }
-        let descriptor = parent.fileName.withCString {
-            systemOpenAt(parent.descriptor, $0, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW, 0)
+    private static func mapAccessError(
+        _ error: ArtifactAccessError,
+        path: String
+    ) -> LocalReleaseArtifactStoreError {
+        switch error {
+        case .pageByteLimitExceeded, .totalByteLimitExceeded,
+                .pageCountLimitExceeded, .workLimitExceeded,
+                .deadlineExceeded:
+            return .readBudgetExceeded(path)
+        case .resourceGenerationChanged, .noncontiguousOffset,
+                .truncatedResource, .byteCountMismatch,
+                .contentDigestMismatch, .contentIdentityMismatch:
+            return .readIntegrityFailed(path)
+        case .cancelled:
+            return .readCancelled(path)
+        case .invalidIntent, .unsupportedCapability, .availabilityNotLocal,
+                .rootMismatch, .invalidRoot, .symlinkTraversal,
+                .nonRegularResource:
+            return .invalidLocation(path)
+        case .fileCloseFailed(let reason):
+            return .readCleanupFailed(
+                path: path,
+                primaryReason: nil,
+                closeReason: reason
+            )
+        case .cleanupFailed(let primary, let closeReason):
+            return .readCleanupFailed(
+                path: path,
+                primaryReason: primary,
+                closeReason: closeReason
+            )
+        case .openFailed, .metadataFailed, .resourceUnavailable,
+                .readFailed, .sessionClosed:
+            return .readFailed(path)
         }
-        guard descriptor >= 0 else {
-            throw LocalReleaseArtifactStoreError.readFailed(path)
-        }
-        defer { systemClose(descriptor) }
-        var status = stat()
-        guard systemFStat(descriptor, &status) == 0,
-              status.st_size >= 0,
-              (status.st_mode & S_IFMT) == S_IFREG,
-              UInt64(status.st_size) == expectedByteCount,
-              UInt64(status.st_size) <= UInt64(Int.max) else {
-            throw LocalReleaseArtifactStoreError.readFailed(path)
-        }
-        var data = Data(count: Int(status.st_size))
-        guard readAll(from: descriptor, into: &data) else {
-            throw LocalReleaseArtifactStoreError.readFailed(path)
-        }
-        var trailingByte: UInt8 = 0
-        let trailingCount = withUnsafeMutablePointer(to: &trailingByte) {
-            systemRead(descriptor, $0, 1)
-        }
-        var finalStatus = stat()
-        guard trailingCount == 0,
-              systemFStat(descriptor, &finalStatus) == 0,
-              finalStatus.st_size == status.st_size,
-              (finalStatus.st_mode & S_IFMT) == S_IFREG else {
-            throw LocalReleaseArtifactStoreError.readFailed(path)
-        }
-        return data
     }
 
     private func openParentDirectory(
@@ -290,22 +435,6 @@ public actor LocalReleaseArtifactStore: ReleaseArtifactPersisting {
         }
     }
 
-    private func readAll(from descriptor: Int32, into data: inout Data) -> Bool {
-        data.withUnsafeMutableBytes { buffer in
-            guard let base = buffer.baseAddress else { return buffer.isEmpty }
-            var offset = 0
-            while offset < buffer.count {
-                let count = systemRead(descriptor, base.advanced(by: offset), buffer.count - offset)
-                if count < 0 {
-                    if systemErrno == EINTR { continue }
-                    return false
-                }
-                guard count > 0 else { return false }
-                offset += count
-            }
-            return true
-        }
-    }
 }
 
 private var systemErrno: Int32 {
@@ -346,20 +475,12 @@ private func systemWrite(_ descriptor: Int32, _ buffer: UnsafeRawPointer, _ coun
     write(descriptor, buffer, count)
 }
 
-private func systemRead(_ descriptor: Int32, _ buffer: UnsafeMutableRawPointer, _ count: Int) -> Int {
-    read(descriptor, buffer, count)
-}
-
 private func systemFSync(_ descriptor: Int32) -> Int32 {
     fsync(descriptor)
 }
 
 private func systemFChmod(_ descriptor: Int32, _ mode: mode_t) -> Int32 {
     fchmod(descriptor, mode)
-}
-
-private func systemFStat(_ descriptor: Int32, _ status: UnsafeMutablePointer<stat>) -> Int32 {
-    fstat(descriptor, status)
 }
 
 private func systemClose(_ descriptor: Int32) {

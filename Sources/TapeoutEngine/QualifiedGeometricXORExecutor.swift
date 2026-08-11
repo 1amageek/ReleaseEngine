@@ -1,5 +1,7 @@
 import Foundation
 import CircuiteFoundation
+import CircuiteFoundationCrypto
+import CircuiteFoundationFoundation
 import ReleaseCore
 import SignoffToolSupport
 import ToolQualification
@@ -7,7 +9,6 @@ import ToolQualification
 public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
     private let configuration: GeometricXORToolConfiguration
     private let artifactPersister: any ReleaseArtifactPersisting
-    private let verifier: LocalArtifactVerifier
     private let digester: SHA256ContentDigester
     private let processRunner: any TimedProcessRunning
     private let now: @Sendable () -> Date
@@ -15,12 +16,10 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
     public init(
         configuration: GeometricXORToolConfiguration,
         artifactPersister: any ReleaseArtifactPersisting = LocalReleaseArtifactStore(),
-        verifier: LocalArtifactVerifier = LocalArtifactVerifier(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.configuration = configuration
         self.artifactPersister = artifactPersister
-        self.verifier = verifier
         self.digester = SHA256ContentDigester()
         self.processRunner = TimedProcessRunner(timeoutSeconds: configuration.timeoutSeconds)
         self.now = now
@@ -30,27 +29,27 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
         configuration: GeometricXORToolConfiguration,
         artifactPersister: any ReleaseArtifactPersisting,
         processRunner: any TimedProcessRunning,
-        verifier: LocalArtifactVerifier = LocalArtifactVerifier(),
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.configuration = configuration
         self.artifactPersister = artifactPersister
-        self.verifier = verifier
         self.digester = SHA256ContentDigester()
         self.processRunner = processRunner
         self.now = now
     }
 
     public func compare(
-        source: ArtifactReference,
-        streamed: ArtifactReference,
+        source: ReleaseArtifactBinding,
+        streamed: ReleaseArtifactBinding,
         pdkDigest: String,
         projectRoot: URL?
     ) async -> LayoutXORResult {
         let startedAt = now()
         let qualification = configuration.qualification
-        let sourceDigest = source.digest.hexadecimalValue
-        let streamedDigest = streamed.digest.hexadecimalValue
+        let sourceReference = source.reference
+        let streamedReference = streamed.reference
+        let sourceDigest = sourceReference.digest.hexadecimalValue
+        let streamedDigest = streamedReference.digest.hexadecimalValue
 
         guard let projectRoot else {
             return result(
@@ -61,7 +60,8 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
                 message: "A project root is required for qualified geometric XOR."
             )
         }
-        guard Self.isStandardLayout(source), Self.isStandardLayout(streamed) else {
+        guard Self.isStandardLayout(sourceReference),
+              Self.isStandardLayout(streamedReference) else {
             return result(
                 status: .blocked,
                 executionStatus: .notExecuted,
@@ -70,8 +70,12 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
                 message: "Qualified geometric XOR accepts only GDSII or OASIS layout artifacts."
             )
         }
-        guard verifier.verify(source, relativeTo: projectRoot).isVerified,
-              verifier.verify(streamed, relativeTo: projectRoot).isVerified else {
+        let sourceData: Data
+        let streamedData: Data
+        do {
+            sourceData = try await artifactPersister.load(source, relativeTo: projectRoot)
+            streamedData = try await artifactPersister.load(streamed, relativeTo: projectRoot)
+        } catch {
             return result(
                 status: .blocked,
                 executionStatus: .notExecuted,
@@ -101,14 +105,12 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
         }
 
         let executableArtifact = qualification.identityArtifacts.toolExecutable
-        guard let producer = executableArtifact.producer,
-              producer.kind == .tool,
-              producer.identifier == qualification.scope.implementationID,
-              producer.version == qualification.scope.toolVersion,
-              executableArtifact.digest.hexadecimalValue.caseInsensitiveCompare(
+        guard executableArtifact.digest.hexadecimalValue.caseInsensitiveCompare(
                 qualification.scope.binaryDigest
               ) == .orderedSame,
-              verifier.verify(executableArtifact, relativeTo: projectRoot).isVerified else {
+              let executableBinding = configuration.qualificationBindings.first(where: {
+                  $0.reference == executableArtifact
+              }) else {
             return result(
                 status: .blocked,
                 executionStatus: .unqualified,
@@ -117,30 +119,26 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
                 message: "The qualified executable identity does not match its retained artifact."
             )
         }
-
-        let executableURL: URL
-        let sourceURL: URL
-        let streamedURL: URL
+        let producer: ProducerIdentity
+        let executableData: Data
         do {
-            executableURL = try executableArtifact.locator.location.resolvedFileURL(relativeTo: projectRoot)
-            sourceURL = try source.locator.location.resolvedFileURL(relativeTo: projectRoot)
-            streamedURL = try streamed.locator.location.resolvedFileURL(relativeTo: projectRoot)
+            producer = try ProducerIdentity(
+                kind: .tool,
+                identifier: qualification.scope.implementationID,
+                version: qualification.scope.toolVersion,
+                build: qualification.scope.binaryDigest
+            )
+            executableData = try await artifactPersister.load(
+                executableBinding,
+                relativeTo: projectRoot
+            )
         } catch {
             return result(
                 status: .blocked,
                 executionStatus: .notExecuted,
                 sourceDigest: sourceDigest,
                 streamedDigest: streamedDigest,
-                message: "A geometric XOR input or executable path is invalid."
-            )
-        }
-        guard FileManager.default.isExecutableFile(atPath: executableURL.path) else {
-            return result(
-                status: .blocked,
-                executionStatus: .unqualified,
-                sourceDigest: sourceDigest,
-                streamedDigest: streamedDigest,
-                message: "The qualified geometric XOR artifact is not executable."
+                message: "The qualified executable binding could not be verified."
             )
         }
 
@@ -148,12 +146,11 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
         do {
             workspace = try GeometricXORExecutionWorkspace.create(
                 executable: executableArtifact,
-                executableURL: executableURL,
-                source: source,
-                sourceURL: sourceURL,
-                streamed: streamed,
-                streamedURL: streamedURL,
-                verifier: verifier
+                executableData: executableData,
+                source: sourceReference,
+                sourceData: sourceData,
+                streamed: streamedReference,
+                streamedData: streamedData
             )
         } catch {
             return result(
@@ -272,7 +269,7 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
         }
 
         do {
-            guard workspace.verify(using: verifier) else {
+            guard workspace.verify() else {
                 return cleanupFailureOrResult(
                     temporaryDirectory: workspace.directoryURL,
                     fallback: result(
@@ -303,16 +300,16 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
             let reportDigest = try digester.digest(data: reportData)
             let evidence = try await artifactPersister.persist(
                 ReleaseArtifactPersistenceRequest(
-                    locator: configuration.reportOutput,
+                    logicalID: "geometric-xor-report",
+                    destination: configuration.reportOutput,
                     bytes: reportData,
                     producer: producer
                 ),
                 relativeTo: projectRoot
             )
             let retainedReport = try await artifactPersister.load(evidence, relativeTo: projectRoot)
-            guard evidence.digest == reportDigest,
-                  evidence.byteCount == UInt64(reportData.count),
-                  evidence.producer == producer,
+            guard evidence.reference.digest == reportDigest,
+                  evidence.reference.byteCount == UInt64(reportData.count),
                   retainedReport == reportData else {
                 return result(
                     status: .blocked,
@@ -325,7 +322,7 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
             }
             let provenance = try ExecutionProvenance(
                 producer: producer,
-                inputs: [source, streamed],
+                inputs: [sourceReference, streamedReference],
                 invocation: invocation,
                 environment: environmentFingerprint,
                 startedAt: startedAt,
@@ -341,8 +338,9 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
                 message: hasDifferences
                     ? "Geometric XOR found layout differences."
                     : "Qualified geometric XOR found no layout differences.",
-                evidenceArtifact: evidence,
+                evidenceBinding: evidence,
                 processQualification: qualification,
+                qualificationBindings: configuration.qualificationBindings,
                 executionStatus: .completed,
                 exitCode: processResult.exitCode,
                 differenceCount: report.differenceCount,
@@ -434,13 +432,16 @@ public struct QualifiedGeometricXORExecutor: LayoutXORComparing {
             streamedDigest: streamedDigest,
             message: message,
             processQualification: configuration.qualification,
+            qualificationBindings: configuration.qualificationBindings,
             executionStatus: executionStatus,
             exitCode: exitCode
         )
     }
 
     private static func isStandardLayout(_ artifact: ArtifactReference) -> Bool {
-        artifact.kind == .layout && (artifact.format == .gdsii || artifact.format == .oasis)
+        artifact.descriptor.kind == .layout
+            && (artifact.descriptor.format == .gdsii
+                || artifact.descriptor.format == .oasis)
     }
 
     private static var platform: String {

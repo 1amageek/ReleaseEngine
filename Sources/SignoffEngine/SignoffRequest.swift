@@ -4,48 +4,51 @@ import CircuiteFoundation
 import ReleaseCore
 
 public struct SignoffRequest: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 4
 
     public var schemaVersion: Int
     public var runID: String
-    public var inputs: [ArtifactReference]
+    public var inputBindings: [ReleaseArtifactBinding]
 
     public var profileID: String
     public var designKind: ReleaseDesignKind
     public var designDigest: String
     public var designProvenance: LogicDesignProvenance?
     public var pdkDigest: String
-    public var evidence: [ArtifactReference]
+    public var evidenceBindings: [ReleaseArtifactBinding]
     public var evidenceRecords: [ReleaseSignoffEvidenceReference]
     public var waivers: [SignoffWaiver]
     public var projectRoot: String?
     public var finalLayoutDigest: String?
-    public var bundleOutput: ArtifactLocator
+    public var bundleOutput: ReleaseArtifactDestination
+
+    public var inputs: [ArtifactReference] { inputBindings.map(\.reference) }
+    public var evidence: [ArtifactReference] { evidenceBindings.map(\.reference) }
 
     public init(
         runID: String,
-        inputs: [ArtifactReference],
+        inputBindings: [ReleaseArtifactBinding],
         profileID: String,
         designDigest: String,
         designProvenance: LogicDesignProvenance? = nil,
         pdkDigest: String,
-        evidence: [ArtifactReference],
+        evidenceBindings: [ReleaseArtifactBinding],
         designKind: ReleaseDesignKind = .digital,
         evidenceRecords: [ReleaseSignoffEvidenceReference] = [],
         waivers: [SignoffWaiver] = [],
         projectRoot: String? = nil,
         finalLayoutDigest: String? = nil,
-        bundleOutput: ArtifactLocator
+        bundleOutput: ReleaseArtifactDestination
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.runID = runID
-        self.inputs = inputs
+        self.inputBindings = inputBindings
         self.profileID = profileID
         self.designKind = designKind
         self.designDigest = designDigest
         self.designProvenance = designProvenance
         self.pdkDigest = pdkDigest
-        self.evidence = evidence
+        self.evidenceBindings = evidenceBindings
         self.evidenceRecords = evidenceRecords
         self.waivers = waivers
         self.projectRoot = projectRoot

@@ -3,7 +3,7 @@ import CryptoKit
 import CircuiteFoundation
 
 public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 4
+    public static let currentSchemaVersion = 5
 
     public var schemaVersion: Int
     public var releaseID: String
@@ -53,18 +53,13 @@ public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
             .sorted(by: Self.artifactSort)
             .map {
                 Self.lengthPrefixed([
-                    $0.id.rawValue,
-                    $0.path,
-                    $0.locator.role.rawValue,
-                    $0.kind.rawValue,
-                    $0.format.rawValue,
+                    $0.id.description,
+                    $0.descriptor.role.rawValue,
+                    $0.descriptor.kind.rawValue,
+                    $0.descriptor.format.rawValue,
                     $0.digest.algorithm.rawValue,
                     $0.digest.hexadecimalValue,
                     String($0.byteCount),
-                    $0.producer?.kind.rawValue ?? "",
-                    $0.producer?.identifier ?? "",
-                    $0.producer?.version ?? "",
-                    $0.producer?.build ?? "",
                 ])
             }
         let artifactMaterial = Self.lengthPrefixed(artifactEntries)
@@ -107,10 +102,8 @@ public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
             && !artifacts.isEmpty
             && artifacts.count == Set(artifacts).count
             && artifacts.allSatisfy {
-                $0.locator.location.storage == .workspaceRelative
-                    && $0.digest.algorithm == .sha256
+                $0.digest.algorithm == .sha256
                     && $0.byteCount > 0
-                    && $0.producer != nil
             }
             && !evidenceIDs.isEmpty
             && evidenceIDs.count == Set(evidenceIDs).count
@@ -169,18 +162,13 @@ public struct FoundryHandoffManifest: Sendable, Hashable, Codable {
 
     private static func artifactKey(_ artifact: ArtifactReference) -> [String] {
         [
-            artifact.id.rawValue,
-            artifact.path,
-            artifact.locator.role.rawValue,
-            artifact.kind.rawValue,
-            artifact.format.rawValue,
+            artifact.id.description,
+            artifact.descriptor.role.rawValue,
+            artifact.descriptor.kind.rawValue,
+            artifact.descriptor.format.rawValue,
             artifact.digest.algorithm.rawValue,
             artifact.digest.hexadecimalValue,
             String(artifact.byteCount),
-            artifact.producer?.kind.rawValue ?? "",
-            artifact.producer?.identifier ?? "",
-            artifact.producer?.version ?? "",
-            artifact.producer?.build ?? "",
         ]
     }
 

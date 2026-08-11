@@ -1,4 +1,6 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
+import CircuiteFoundationFileSystem
 import Foundation
 import LogicIR
 import ReleaseCore
@@ -44,16 +46,13 @@ struct SignoffBehaviorTests {
     func missingEvidenceBlocks() async throws {
         let request = SignoffRequest(
             runID: "missing",
-            inputs: [],
+            inputBindings: [],
             profileID: "digital",
             designDigest: String(repeating: "1", count: 64),
             pdkDigest: String(repeating: "2", count: 64),
-            evidence: [],
-            bundleOutput: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: "release/missing.json"),
-                role: .output,
-                kind: .release,
-                format: .json
+            evidenceBindings: [],
+            bundleOutput: try Self.destination(
+                path: ["release", "missing.json"]
             )
         )
         let result = try await DefaultSignoffEvaluator().execute(request)
@@ -67,7 +66,7 @@ struct SignoffBehaviorTests {
         let digest = String(repeating: "1", count: 64)
         let request = SignoffRequest(
             runID: "lineage",
-            inputs: [],
+            inputBindings: [],
             profileID: "digital",
             designDigest: digest,
             designProvenance: LogicDesignProvenance(
@@ -78,12 +77,9 @@ struct SignoffBehaviorTests {
                 producerVersion: "1"
             ),
             pdkDigest: String(repeating: "2", count: 64),
-            evidence: [],
-            bundleOutput: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: "release/lineage.json"),
-                role: .output,
-                kind: .release,
-                format: .json
+            evidenceBindings: [],
+            bundleOutput: try Self.destination(
+                path: ["release", "lineage.json"]
             )
         )
         let result = try await DefaultSignoffEvaluator().execute(request)
@@ -394,32 +390,6 @@ struct SignoffBehaviorTests {
         })
     }
 
-    @Test("operational artifact producer cannot be substituted")
-    func operationalArtifactProducerSubstitutionBlocks() async throws {
-        let fixture = try await SignoffFixture()
-        defer { removeReleaseFixture(fixture.root) }
-        var records = fixture.records
-        let artifact = records[0].artifact
-        records[0].artifact = ArtifactReference(
-            id: artifact.id,
-            locator: artifact.locator,
-            digest: artifact.digest,
-            byteCount: artifact.byteCount,
-            producer: try ProducerIdentity(
-                kind: .tool,
-                identifier: "substituted-signoff-tool",
-                version: "1.0.0"
-            )
-        )
-
-        let result = try await fixture.evaluate(records: records)
-
-        #expect(result.status == .blocked)
-        #expect(result.diagnostics.contains {
-            $0.code.rawValue == "OPERATIONAL_ARTIFACT_PROVENANCE_MISMATCH"
-        })
-    }
-
     @Test("signoff evidence retains immutable design and PDK inputs")
     func incompleteInputBindingBlocks() async throws {
         let fixture = try await SignoffFixture()
@@ -474,7 +444,9 @@ struct SignoffBehaviorTests {
         defer { removeReleaseFixture(fixture.root) }
         let record = try #require(fixture.records.first)
         try Data("tampered".utf8).write(
-            to: fixture.root.appending(path: record.artifact.path),
+            to: fixture.root.appending(
+                path: try fixture.relativePath(for: record.artifact).stringValue
+            ),
             options: .atomic
         )
 
@@ -482,6 +454,20 @@ struct SignoffBehaviorTests {
 
         #expect(result.status == .blocked)
         #expect(result.diagnostics.contains { $0.code.rawValue == "EVIDENCE_ARTIFACT_INTEGRITY_FAILED" })
+    }
+
+    private static func destination(
+        path: [String]
+    ) throws -> ReleaseArtifactDestination {
+        ReleaseArtifactDestination(
+            rootID: try ArtifactRootID(rawValue: "signoff-test-root"),
+            relativePath: try ArtifactRelativePath(segments: path),
+            descriptor: ArtifactDescriptor(
+                role: .output,
+                kind: .release,
+                format: .json
+            )
+        )
     }
 }
 
@@ -494,32 +480,74 @@ private struct SignoffFixture {
     let pdkDigest: String
     let records: [ReleaseSignoffEvidenceReference]
     let bundleReference: SignoffBundleReference
+    let artifactBindingsByID: [ArtifactID: ReleaseArtifactBinding]
 
     init(failedAxis: ReleaseSignoffAxis? = nil) async throws {
         root = FileManager.default.temporaryDirectory
             .appending(path: "signoff-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        designArtifact = try Self.write("design", path: "inputs/design.json", kind: .input, role: .input, root: root)
-        pdkArtifact = try Self.write("pdk", path: "inputs/pdk.json", kind: .technology, role: .input, root: root)
+        var generatedBindings: [ArtifactID: ReleaseArtifactBinding] = [:]
+        designArtifact = try Self.write(
+            "design",
+            path: "inputs/design.json",
+            kind: .input,
+            role: .input,
+            root: root,
+            bindings: &generatedBindings
+        )
+        pdkArtifact = try Self.write(
+            "pdk",
+            path: "inputs/pdk.json",
+            kind: .technology,
+            role: .input,
+            root: root,
+            bindings: &generatedBindings
+        )
         let localDesignDigest = designArtifact.digest.hexadecimalValue
         let localPDKDigest = pdkArtifact.digest.hexadecimalValue
         designDigest = localDesignDigest
         pdkDigest = localPDKDigest
 
-        let toolProducer = try ProducerIdentity(kind: .tool, identifier: "signoff-tool", version: "1.0.0")
-        let oracleProducer = try ProducerIdentity(kind: .tool, identifier: "signoff-oracle", version: "2.0.0")
         let issuer = try ProducerIdentity(kind: .engine, identifier: "qualification-engine", version: "1.0.0")
-        let tool = try Self.write("tool", path: "identity/tool", kind: .other, role: .input, root: root, producer: toolProducer)
+        let tool = try Self.write(
+            "tool",
+            path: "identity/tool",
+            kind: .other,
+            role: .input,
+            root: root,
+            bindings: &generatedBindings
+        )
         let operationalToolProducer = try ProducerIdentity(
             kind: .tool,
             identifier: "signoff-tool",
             version: "1.0.0",
             build: tool.digest.hexadecimalValue
         )
-        let process = try Self.write("process", path: "identity/process.json", kind: .technology, role: .input, root: root)
+        let process = try Self.write(
+            "process",
+            path: "identity/process.json",
+            kind: .technology,
+            role: .input,
+            root: root,
+            bindings: &generatedBindings
+        )
         let pdk = pdkArtifact
-        let deck = try Self.write("deck", path: "identity/deck.json", kind: .ruleDeck, role: .input, root: root)
-        let oracle = try Self.write("oracle", path: "identity/oracle", kind: .other, role: .input, root: root, producer: oracleProducer)
+        let deck = try Self.write(
+            "deck",
+            path: "identity/deck.json",
+            kind: .ruleDeck,
+            role: .input,
+            root: root,
+            bindings: &generatedBindings
+        )
+        let oracle = try Self.write(
+            "oracle",
+            path: "identity/oracle",
+            kind: .other,
+            role: .input,
+            root: root,
+            bindings: &generatedBindings
+        )
         let scope = ToolQualificationScope(
             implementationID: "signoff-tool",
             toolVersion: "1.0.0",
@@ -544,10 +572,17 @@ private struct SignoffFixture {
                 kind: .report,
                 role: .output,
                 root: root,
-                producer: operationalToolProducer
+                bindings: &generatedBindings
             ))
         }
-        let oracleOutput = try Self.write("oracle-output", path: "reports/oracle.json", kind: .report, role: .output, root: root, producer: oracleProducer)
+        let oracleOutput = try Self.write(
+            "oracle-output",
+            path: "reports/oracle.json",
+            kind: .report,
+            role: .output,
+            root: root,
+            bindings: &generatedBindings
+        )
         let caseOutcome = ToolQualificationCaseOutcome(
             caseID: "signoff-corpus",
             coverageTags: ["all-release-axes"],
@@ -570,7 +605,7 @@ private struct SignoffFixture {
             kind: .evidence,
             role: .output,
             root: root,
-            producer: issuer
+            bindings: &generatedBindings
         )
         let oracleResult = ToolOracleQualificationResult(
             resultID: "oracle-result",
@@ -600,7 +635,7 @@ private struct SignoffFixture {
             kind: .evidence,
             role: .output,
             root: root,
-            producer: issuer
+            bindings: &generatedBindings
         )
         let healthResult = ToolHealthQualificationResult(
             resultID: "health-result",
@@ -618,7 +653,7 @@ private struct SignoffFixture {
             kind: .evidence,
             role: .output,
             root: root,
-            producer: issuer
+            bindings: &generatedBindings
         )
         let buildRequest = ToolProcessQualificationEvidenceBuildRequest(
             qualificationID: "signoff-production",
@@ -639,10 +674,11 @@ private struct SignoffFixture {
             qualifiedAt: evaluatedAt.addingTimeInterval(-10),
             expiresAt: evaluatedAt.addingTimeInterval(10)
         )
-        let qualification = try await ToolProcessQualificationEvidenceBuilder().build(
+        let qualification = try await Self.buildQualification(
             buildRequest,
-            reading: LocalToolQualificationArtifactReader(workspaceRoot: root),
-            at: evaluatedAt
+            root: root,
+            bindings: generatedBindings,
+            evaluatedAt: evaluatedAt
         )
         var generatedRecords: [ReleaseSignoffEvidenceReference] = []
         for (axis, report) in zip(ReleaseSignoffAxis.allCases, reports) {
@@ -694,29 +730,26 @@ private struct SignoffFixture {
             issuedAt: evaluatedAt
         )
         let bundleBytes = try bundle.canonicalData()
-        let bundleLocator = ArtifactLocator(
-            location: try ArtifactLocation(workspaceRelativePath: "release/signoff.json"),
-            role: .output,
+        let bundleArtifact = try Self.write(
+            bundleBytes,
+            path: "release/signoff.json",
+            logicalID: "signoff-signoff-bundle",
             kind: .release,
-            format: .json
-        )
-        let bundleArtifact = ArtifactReference(
-            locator: bundleLocator,
-            digest: try SHA256ContentDigester().digest(data: bundleBytes),
-            byteCount: UInt64(bundleBytes.count),
-            producer: try ProducerIdentity(
-                kind: .engine,
-                identifier: "native.release.signoff",
-                version: "2.0.0",
-                build: ReleaseRuntimeIdentity.currentExecutableDigest()
-            )
+            role: .output,
+            root: root,
+            bindings: &generatedBindings,
+            persist: false
         )
         bundleReference = SignoffBundleReference(
-            artifact: bundleArtifact,
+            artifact: try Self.requireBinding(
+                for: bundleArtifact,
+                in: generatedBindings
+            ),
             designDigest: designDigest,
             pdkDigest: pdkDigest,
             finalLayoutDigest: bundle.finalLayoutDigest
         )
+        artifactBindingsByID = generatedBindings
     }
 
     func evaluate(
@@ -729,20 +762,37 @@ private struct SignoffFixture {
         includeProjectRoot: Bool = true
     ) async throws -> SignoffResult {
         let evaluatedRecords = suppliedRecords ?? records
+        let inputReferences = suppliedInputs ?? boundInputs(for: evaluatedRecords)
+        let evidenceReferences = suppliedEvidence ?? evaluatedRecords.map(\.artifact)
         return try await DefaultSignoffEvaluator(now: { evaluatedAt }).execute(SignoffRequest(
             runID: "signoff",
-            inputs: suppliedInputs ?? boundInputs(for: evaluatedRecords),
+            inputBindings: try inputReferences.map(binding(for:)),
             profileID: profileID,
             designDigest: designDigest,
             pdkDigest: pdkDigest,
-            evidence: suppliedEvidence ?? evaluatedRecords.map(\.artifact),
+            evidenceBindings: try evidenceReferences.map(binding(for:)),
             designKind: designKind,
             evidenceRecords: evaluatedRecords,
             waivers: waivers,
             projectRoot: includeProjectRoot ? root.path : nil,
             finalLayoutDigest: bundleReference.finalLayoutDigest,
-            bundleOutput: bundleReference.artifact.locator
+            bundleOutput: try Self.destination(
+                from: bundleReference.artifact.availability,
+                descriptor: bundleReference.artifact.reference.descriptor
+            )
         ))
+    }
+
+    func binding(for reference: ArtifactReference) throws -> ReleaseArtifactBinding {
+        try Self.requireBinding(for: reference, in: artifactBindingsByID)
+    }
+
+    func relativePath(for reference: ArtifactReference) throws -> ArtifactRelativePath {
+        let binding = try binding(for: reference)
+        guard case .local(_, _, let relativePath) = binding.availability else {
+            throw ReleaseArtifactBindingError.missingBinding(reference.id)
+        }
+        return relativePath
     }
 
     func boundInputs(
@@ -767,31 +817,127 @@ private struct SignoffFixture {
         kind: ArtifactKind,
         role: ArtifactRole,
         root: URL,
-        producer: ProducerIdentity? = nil
+        bindings: inout [ArtifactID: ReleaseArtifactBinding],
+        persist: Bool = true
     ) throws -> ArtifactReference {
-        try write(Data(string.utf8), path: path, kind: kind, role: role, root: root, producer: producer)
+        try write(
+            Data(string.utf8),
+            path: path,
+            kind: kind,
+            role: role,
+            root: root,
+            bindings: &bindings,
+            persist: persist
+        )
     }
 
     private static func write(
         _ data: Data,
         path: String,
+        logicalID: String? = nil,
         kind: ArtifactKind,
         role: ArtifactRole,
         root: URL,
-        producer: ProducerIdentity? = nil
+        bindings: inout [ArtifactID: ReleaseArtifactBinding],
+        persist: Bool = true
     ) throws -> ArtifactReference {
         let url = root.appending(path: path)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: url, options: .atomic)
-        return try LocalArtifactReferencer().reference(
-            ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: path),
+        if persist {
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: url, options: .atomic)
+        }
+        let reference = try ArtifactReference(
+            digest: SHA256ContentDigester().digest(data: data),
+            byteCount: UInt64(data.count),
+            descriptor: ArtifactDescriptor(
                 role: role,
                 kind: kind,
                 format: .json
-            ),
-            relativeTo: root,
-            producer: producer
+            )
+        )
+        bindings[reference.id] = try ReleaseArtifactBinding(
+            logicalID: logicalID ?? path.replacingOccurrences(of: "/", with: "."),
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: "signoff-test-root"),
+                relativePath: ArtifactRelativePath(
+                    segments: path.split(separator: "/").map(String.init)
+                )
+            )
+        )
+        return reference
+    }
+
+    private static func requireBinding(
+        for reference: ArtifactReference,
+        in bindings: [ArtifactID: ReleaseArtifactBinding]
+    ) throws -> ReleaseArtifactBinding {
+        guard let binding = bindings[reference.id],
+              binding.reference == reference else {
+            throw ReleaseArtifactBindingError.missingBinding(reference.id)
+        }
+        return binding
+    }
+
+    private static func buildQualification(
+        _ request: ToolProcessQualificationEvidenceBuildRequest,
+        root: URL,
+        bindings: [ArtifactID: ReleaseArtifactBinding],
+        evaluatedAt: Date
+    ) async throws -> ToolProcessQualificationEvidence {
+        let rootID = try ArtifactRootID(rawValue: "signoff-test-root")
+        let access = try ArtifactRootCapability(
+            rootID: rootID,
+            directoryURL: root,
+            digester: SHA256ContentDigester()
+        )
+        let qualification: ToolProcessQualificationEvidence
+        do {
+            qualification = try await ToolProcessQualificationEvidenceBuilder().build(
+                request,
+                reading: LocalToolQualificationArtifactReader(
+                    access: access,
+                    availabilities: bindings.mapValues(\.availability),
+                    budget: ArtifactAccessBudget(
+                        maximumPageByteCount: 64 * 1_024,
+                        maximumTotalByteCount: 64 * 1_024 * 1_024,
+                        maximumPageCount: 4_096,
+                        maximumWorkUnitCount: 16_384,
+                        maximumDurationNanoseconds: 30_000_000_000
+                    )
+                ),
+                at: evaluatedAt
+            )
+        } catch {
+            let termination = await access.close()
+            do {
+                _ = try await termination.wait()
+            } catch let closeError {
+                Issue.record(
+                    "Qualification fixture close failed: \(closeError.localizedDescription)"
+                )
+            }
+            throw error
+        }
+        try await access.close().wait()
+        return qualification
+    }
+
+    private static func destination(
+        from availability: ArtifactAvailability,
+        descriptor: ArtifactDescriptor
+    ) throws -> ReleaseArtifactDestination {
+        guard case .local(_, let rootID, let relativePath) = availability else {
+            throw ReleaseArtifactBindingError.emptyLogicalID
+        }
+        return ReleaseArtifactDestination(
+            rootID: rootID,
+            relativePath: relativePath,
+            descriptor: descriptor
         )
     }
 }

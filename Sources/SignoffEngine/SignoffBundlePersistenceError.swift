@@ -7,7 +7,7 @@ public enum SignoffBundlePersistenceError: Error, Sendable, Hashable, LocalizedE
     public var errorDescription: String? {
         switch self {
         case .referenceMismatch:
-            "The persisted signoff bundle reference does not match the requested locator, producer, digest, or byte count."
+            "The persisted signoff bundle binding does not match the requested destination, digest, or byte count."
         case .contentMismatch:
             "The reloaded signoff bundle bytes do not match the generated canonical bundle."
         }

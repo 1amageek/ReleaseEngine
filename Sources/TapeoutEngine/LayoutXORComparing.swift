@@ -4,8 +4,8 @@ import CircuiteFoundation
 
 public protocol LayoutXORComparing: Sendable {
     func compare(
-        source: ArtifactReference,
-        streamed: ArtifactReference,
+        source: ReleaseArtifactBinding,
+        streamed: ReleaseArtifactBinding,
         pdkDigest: String,
         projectRoot: URL?
     ) async -> LayoutXORResult

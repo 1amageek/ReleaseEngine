@@ -5,10 +5,11 @@ import PhysicalDesignCore
 import PDKCore
 
 public struct TapeoutPayload: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 4
 
     public var schemaVersion: Int
-    public var handoffArtifact: ArtifactReference?
+    public var handoffBinding: ReleaseArtifactBinding?
+    public var handoffArtifact: ArtifactReference? { handoffBinding?.reference }
     public var checksum: String?
     public var completed: Bool
     public var layoutDigest: String?
@@ -18,7 +19,7 @@ public struct TapeoutPayload: Sendable, Hashable, Codable {
     public var handoff: FoundryHandoffManifest?
 
     public init(
-        handoffArtifact: ArtifactReference?,
+        handoffBinding: ReleaseArtifactBinding?,
         checksum: String?,
         completed: Bool = false,
         layoutDigest: String? = nil,
@@ -29,7 +30,7 @@ public struct TapeoutPayload: Sendable, Hashable, Codable {
         schemaVersion: Int = Self.currentSchemaVersion
     ) {
         self.schemaVersion = schemaVersion
-        self.handoffArtifact = handoffArtifact
+        self.handoffBinding = handoffBinding
         self.checksum = checksum
         self.completed = completed
         self.layoutDigest = layoutDigest

@@ -2,22 +2,27 @@ import Foundation
 import ReleaseCore
 import ToolQualification
 import CircuiteFoundation
+import CircuiteFoundationFoundation
 
 public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
-    private let verifier: LocalArtifactVerifier
+    private let artifactReader: any ReleaseArtifactReading
 
-    public init(verifier: LocalArtifactVerifier = LocalArtifactVerifier()) {
-        self.verifier = verifier
+    public init(
+        artifactReader: any ReleaseArtifactReading = LocalReleaseArtifactStore()
+    ) {
+        self.artifactReader = artifactReader
     }
 
     public func validate(
         evidence: [ReleaseSignoffEvidenceReference],
+        bindings: [ReleaseArtifactBinding],
         projectRoot: URL?,
+        rootID: ArtifactRootID,
         designDigest: String,
         pdkDigest: String,
         profile: ReleaseSignoffProfile,
         evaluatedAt: Date
-    ) -> SignoffEvidenceValidationResult {
+    ) async -> SignoffEvidenceValidationResult {
         var verifiedIDs: [String] = []
         var blockedIDs: [String] = []
         var blockedAxes = Set<ReleaseSignoffAxis>()
@@ -144,15 +149,6 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
                     entity: record.evidenceID
                 )
             }
-            if record.artifact.producer.map({ executionIdentities.contains($0) }) != true {
-                recordBlocked = true
-                add(
-                    "OPERATIONAL_ARTIFACT_PROVENANCE_MISMATCH",
-                    "The operational result artifact producer must be retained by its execution provenance.",
-                    axis: axis,
-                    entity: record.evidenceID
-                )
-            }
             if Set(record.executionProvenance.inputs) != Set(record.inputArtifacts) {
                 recordBlocked = true
                 add(
@@ -162,7 +158,7 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
                     entity: record.evidenceID
                 )
             }
-            if record.executionProvenance.completedAt > evaluatedAt {
+            if record.executionProvenance.completedAt.foundationDate > evaluatedAt {
                 recordBlocked = true
                 add(
                     "OPERATIONAL_EXECUTION_TIMESTAMP_INVALID",
@@ -215,10 +211,7 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
                     entity: record.evidenceID
                 )
             }
-            if qualification.identityArtifacts.toolExecutable.producer?.kind != .tool
-                || qualification.identityArtifacts.toolExecutable.producer?.identifier != record.toolID
-                || qualification.identityArtifacts.toolExecutable.producer?.version != record.toolVersion
-                || qualification.identityArtifacts.toolExecutable.digest.hexadecimalValue.caseInsensitiveCompare(
+            if qualification.identityArtifacts.toolExecutable.digest.hexadecimalValue.caseInsensitiveCompare(
                     record.toolBinaryDigest
                 ) != .orderedSame {
                 recordBlocked = true
@@ -251,34 +244,37 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
                 )
             }
             if !requirement.requiredArtifactKinds.isEmpty,
-               !requirement.requiredArtifactKinds.contains(record.artifact.kind) {
+               !requirement.requiredArtifactKinds.contains(record.artifact.descriptor.kind) {
                 recordBlocked = true
                 add("UNEXPECTED_EVIDENCE_ARTIFACT_KIND", "Evidence artifact kind is not accepted by the selected signoff axis.", axis: axis, entity: record.evidenceID)
             }
-            if record.artifact.path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if let failure = await integrityFailure(
+                for: record.artifact,
+                bindings: bindings,
+                rootID: rootID,
+                projectRoot: projectRoot
+            ) {
                 recordBlocked = true
-                add("EVIDENCE_PATH_REQUIRED", "Evidence artifact path must be project-relative and non-empty.", axis: axis, entity: record.evidenceID)
-            } else {
-                let integrity = verifier.verify(record.artifact, relativeTo: projectRoot)
-                if !integrity.isVerified {
-                    recordBlocked = true
-                    add(
-                        "EVIDENCE_ARTIFACT_INTEGRITY_FAILED",
-                        integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "),
-                        axis: axis,
-                        entity: record.evidenceID
-                    )
-                }
+                add(
+                    "EVIDENCE_ARTIFACT_INTEGRITY_FAILED",
+                    failure,
+                    axis: axis,
+                    entity: record.evidenceID
+                )
             }
             for inputArtifact in record.inputArtifacts {
-                let integrity = verifier.verify(inputArtifact, relativeTo: projectRoot)
-                if !integrity.isVerified {
+                if let failure = await integrityFailure(
+                    for: inputArtifact,
+                    bindings: bindings,
+                    rootID: rootID,
+                    projectRoot: projectRoot
+                ) {
                     recordBlocked = true
                     add(
                         "SIGNOFF_INPUT_ARTIFACT_INTEGRITY_FAILED",
-                        integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "),
+                        failure,
                         axis: axis,
-                        entity: inputArtifact.path
+                        entity: inputArtifact.id.description
                     )
                 }
             }
@@ -287,14 +283,18 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
                 + qualification.inputArtifacts
                 + qualification.outputArtifacts
             for retainedArtifact in Set(qualificationArtifacts) {
-                let integrity = verifier.verify(retainedArtifact, relativeTo: projectRoot)
-                if !integrity.isVerified {
+                if let failure = await integrityFailure(
+                    for: retainedArtifact,
+                    bindings: bindings,
+                    rootID: rootID,
+                    projectRoot: projectRoot
+                ) {
                     recordBlocked = true
                     add(
                         "QUALIFICATION_ARTIFACT_INTEGRITY_FAILED",
-                        integrity.issues.map { $0.detail ?? $0.code.rawValue }.joined(separator: "; "),
+                        failure,
                         axis: axis,
-                        entity: retainedArtifact.path
+                        entity: retainedArtifact.id.description
                     )
                 }
             }
@@ -312,6 +312,28 @@ public struct DefaultSignoffEvidenceValidator: SignoffEvidenceValidating {
             diagnosticCodesByAxis: codesByAxis.mapValues { $0.sorted() },
             diagnostics: diagnostics
         )
+    }
+
+    private func integrityFailure(
+        for reference: ArtifactReference,
+        bindings: [ReleaseArtifactBinding],
+        rootID: ArtifactRootID,
+        projectRoot: URL
+    ) async -> String? {
+        let matches = bindings.filter { $0.reference == reference }
+        guard matches.count == 1, let binding = matches.first else {
+            return "The exact artifact availability binding is missing or ambiguous."
+        }
+        guard case .local(_, let boundRootID, _) = binding.availability,
+              boundRootID == rootID else {
+            return "The artifact availability is not local to the admitted release root."
+        }
+        do {
+            _ = try await artifactReader.load(binding, relativeTo: projectRoot)
+            return nil
+        } catch {
+            return "The exact artifact bytes failed integrity verification: \(error.localizedDescription)"
+        }
     }
 
     private func isSHA256(_ value: String) -> Bool {

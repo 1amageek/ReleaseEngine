@@ -5,46 +5,56 @@ import PhysicalDesignCore
 import PDKCore
 
 public struct TapeoutRequest: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 3
+    public static let currentSchemaVersion = 5
 
     public var schemaVersion: Int
     public var runID: String
-    public var inputs: [ArtifactReference]
+    public var inputBindings: [ReleaseArtifactBinding]
 
     public var signoffBundle: SignoffBundleReference
-    public var authorization: ArtifactReference
+    public var exactReleaseBundle: ReleaseExactBundle
+    public var authorizationBinding: ReleaseArtifactBinding
     public var physicalDesign: PhysicalDesignReference
     public var pdk: PDKReference
+    public var pdkManifestBinding: ReleaseArtifactBinding
     public var streamOut: StreamOutGenerationRequest
     public var foundryID: String
     public var projectRoot: String?
-    public var handoffOutput: ArtifactLocator
-    public var evidence: [ArtifactReference]
+    public var handoffOutput: ReleaseArtifactDestination
+    public var evidenceBindings: [ReleaseArtifactBinding]
+
+    public var inputs: [ArtifactReference] { inputBindings.map(\.reference) }
+    public var authorization: ArtifactReference { authorizationBinding.reference }
+    public var evidence: [ArtifactReference] { evidenceBindings.map(\.reference) }
 
     public init(
         runID: String,
-        inputs: [ArtifactReference],
+        inputBindings: [ReleaseArtifactBinding],
         signoffBundle: SignoffBundleReference,
-        authorization: ArtifactReference,
+        exactReleaseBundle: ReleaseExactBundle,
+        authorizationBinding: ReleaseArtifactBinding,
         physicalDesign: PhysicalDesignReference,
         pdk: PDKReference,
+        pdkManifestBinding: ReleaseArtifactBinding,
         streamOut: StreamOutGenerationRequest,
         foundryID: String,
         projectRoot: String? = nil,
-        handoffOutput: ArtifactLocator,
-        evidence: [ArtifactReference] = []
+        handoffOutput: ReleaseArtifactDestination,
+        evidenceBindings: [ReleaseArtifactBinding] = []
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.runID = runID
-        self.inputs = inputs
+        self.inputBindings = inputBindings
         self.signoffBundle = signoffBundle
-        self.authorization = authorization
+        self.exactReleaseBundle = exactReleaseBundle
+        self.authorizationBinding = authorizationBinding
         self.physicalDesign = physicalDesign
         self.pdk = pdk
+        self.pdkManifestBinding = pdkManifestBinding
         self.streamOut = streamOut
         self.foundryID = foundryID
         self.projectRoot = projectRoot
         self.handoffOutput = handoffOutput
-        self.evidence = evidence
+        self.evidenceBindings = evidenceBindings
     }
 }

@@ -2,10 +2,10 @@ import Foundation
 import CircuiteFoundation
 
 public struct StreamOutManifest: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int
-    public var streamedArtifact: ArtifactReference
+    public var streamedArtifact: ReleaseArtifactBinding
     public var topCell: String
     public var unitsPerDatabaseUnit: Double
     public var layerMap: [String: Int]
@@ -15,7 +15,7 @@ public struct StreamOutManifest: Sendable, Hashable, Codable {
     public var generatedBy: String
 
     public init(
-        streamedArtifact: ArtifactReference,
+        streamedArtifact: ReleaseArtifactBinding,
         topCell: String,
         unitsPerDatabaseUnit: Double,
         layerMap: [String: Int],

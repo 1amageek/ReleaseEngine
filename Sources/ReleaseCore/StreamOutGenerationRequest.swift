@@ -2,10 +2,10 @@ import Foundation
 import CircuiteFoundation
 
 public struct StreamOutGenerationRequest: Sendable, Hashable, Codable {
-    public static let currentSchemaVersion = 1
+    public static let currentSchemaVersion = 2
 
     public var schemaVersion: Int
-    public var output: ArtifactLocator
+    public var output: ReleaseArtifactDestination
     public var topCell: String
     public var unitsPerDatabaseUnit: Double
     public var layerMap: [String: Int]
@@ -17,7 +17,7 @@ public struct StreamOutGenerationRequest: Sendable, Hashable, Codable {
     public var requirements: TapeoutReleaseRequirements
 
     public init(
-        output: ArtifactLocator,
+        output: ReleaseArtifactDestination,
         topCell: String,
         unitsPerDatabaseUnit: Double,
         layerMap: [String: Int],

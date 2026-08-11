@@ -3,14 +3,14 @@ import LogicIR
 import CircuiteFoundation
 
 public struct SignoffBundleReference: Sendable, Hashable, Codable {
-    public var artifact: ArtifactReference
+    public var artifact: ReleaseArtifactBinding
     public var designDigest: String
     public var designProvenance: LogicDesignProvenance?
     public var pdkDigest: String
     public var finalLayoutDigest: String?
 
     public init(
-        artifact: ArtifactReference,
+        artifact: ReleaseArtifactBinding,
         designDigest: String,
         designProvenance: LogicDesignProvenance? = nil,
         pdkDigest: String,

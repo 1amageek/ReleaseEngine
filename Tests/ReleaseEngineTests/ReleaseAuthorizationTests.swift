@@ -1,4 +1,6 @@
 import CircuiteFoundation
+import CircuiteFoundationCrypto
+import DesignDatabaseCore
 import DesignFlowKernel
 import Foundation
 import ReleaseCore
@@ -19,68 +21,165 @@ struct ReleaseAuthorizationTests {
         #expect(result.status == .authorized)
         #expect(result.signoffBundle == fixture.bundleReference)
         #expect(result.diagnostics.isEmpty)
-        #expect(result.evidence.provenance.inputs.contains(fixture.planArtifact))
         #expect(result.evidence.provenance.inputs.contains(
-            fixture.request().approval.evidence.stageResult
+            fixture.planArtifact.reference
         ))
-        #expect(result.evidence.provenance.inputs.contains(fixture.bundleReference.artifact))
+        #expect(result.evidence.provenance.inputs.contains(
+            fixture.request().approval.evidence.stageResult.reference
+        ))
+        #expect(result.evidence.provenance.inputs.contains(
+            fixture.bundleReference.artifact.reference
+        ))
         #expect(result.evidence.provenance.inputs.contains(fixture.signoffEvidenceArtifact))
         #expect(Set(result.evidence.provenance.inputs).isSuperset(
             of: Set(fixture.qualificationRequest.inputs)
         ))
     }
 
-    @Test("signoff bundle must be produced by the canonical signoff engine")
-    func rejectsSubstitutedSignoffBundleProducer() async throws {
+    @Test("release approval identities must equal the builder-owned inventory")
+    func rejectsApprovalIdentityInventoryDrift() async throws {
         let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
-        let base = fixture.request()
-        let substitutedArtifact = ArtifactReference(
-            id: base.signoffBundle.artifact.id,
-            locator: base.signoffBundle.artifact.locator,
-            digest: base.signoffBundle.artifact.digest,
-            byteCount: base.signoffBundle.artifact.byteCount,
-            producer: try ProducerIdentity(
-                kind: .engine,
-                identifier: "substituted-signoff",
-                version: "2.0.0"
-            )
+        let exactBundle = ReleaseExactBundle(
+            databaseRevisions: fixture.exactReleaseBundle.databaseRevisions,
+            semanticDependencyGraphDigest: fixture.exactReleaseBundle
+                .semanticDependencyGraphDigest,
+            contentIdentities: fixture.exactReleaseBundle.contentIdentities,
+            approvalContentIdentities: [fixture.signoffEvidenceArtifact.id],
+            qualificationContentIdentities: fixture.exactReleaseBundle
+                .qualificationContentIdentities,
+            retentionReceipts: fixture.exactReleaseBundle.retentionReceipts
         )
-        let signoffBundle = SignoffBundleReference(
-            artifact: substitutedArtifact,
-            designDigest: base.signoffBundle.designDigest,
-            designProvenance: base.signoffBundle.designProvenance,
-            pdkDigest: base.signoffBundle.pdkDigest,
-            finalLayoutDigest: base.signoffBundle.finalLayoutDigest
-        )
-        let approval = FlowApprovalRecord(
-            runID: base.approval.runID,
-            stageID: base.approval.stageID,
-            verdict: base.approval.verdict,
-            reviewer: base.approval.reviewer,
-            reviewerKind: base.approval.reviewerKind,
-            createdAt: base.approval.createdAt,
-            evidence: FlowApprovalEvidenceBinding(
-                plan: base.approval.evidence.plan,
-                stageResult: substitutedArtifact
-            )
-        )
-        let request = ReleaseAuthorizationRequest(
-            runID: base.runID,
-            stageID: base.stageID,
-            signoffBundle: signoffBundle,
-            approval: approval,
-            toolTrustDecisions: base.toolTrustDecisions,
-            toolQualificationRequests: base.toolQualificationRequests,
-            requiredToolIDs: base.requiredToolIDs,
-            evaluatedAt: base.evaluatedAt,
-            projectRoot: base.projectRoot
+        let request = fixture.replacing(
+            fixture.request(),
+            exactReleaseBundle: exactBundle
         )
 
         let result = try await fixture.authorizer().execute(request)
 
         #expect(result.status == .blocked)
-        #expect(result.diagnostics.contains { $0.code.rawValue == "RELEASE_BUNDLE_CONTENT_MISMATCH" })
+        #expect(result.diagnostics.contains {
+            $0.code.rawValue == "RELEASE_APPROVAL_CONTENT_IDENTITY_MISMATCH"
+        })
+    }
+
+    @Test("release qualification identities must equal the builder-owned inventory")
+    func rejectsQualificationIdentityInventoryDrift() async throws {
+        let fixture = try await Fixture()
+        defer { removeFixture(fixture.root) }
+        let exactBundle = ReleaseExactBundle(
+            databaseRevisions: fixture.exactReleaseBundle.databaseRevisions,
+            semanticDependencyGraphDigest: fixture.exactReleaseBundle
+                .semanticDependencyGraphDigest,
+            contentIdentities: fixture.exactReleaseBundle.contentIdentities,
+            approvalContentIdentities: fixture.exactReleaseBundle
+                .approvalContentIdentities,
+            qualificationContentIdentities: [fixture.planArtifact.reference.id],
+            retentionReceipts: fixture.exactReleaseBundle.retentionReceipts
+        )
+        let request = fixture.replacing(
+            fixture.request(),
+            exactReleaseBundle: exactBundle
+        )
+
+        let result = try await fixture.authorizer().execute(request)
+
+        #expect(result.status == .blocked)
+        #expect(result.diagnostics.contains {
+            $0.code.rawValue == "RELEASE_QUALIFICATION_CONTENT_IDENTITY_MISMATCH"
+        })
+    }
+
+    @Test("unclassified content identities cannot enter the exact release bundle")
+    func rejectsUnclassifiedContentIdentity() async throws {
+        let fixture = try await Fixture()
+        defer { removeFixture(fixture.root) }
+        let unclassified = try ArtifactID(
+            digest: ContentDigest(
+                algorithm: .sha256,
+                hexadecimalValue: String(repeating: "0", count: 64)
+            ),
+            byteCount: 1
+        )
+        let exactBundle = ReleaseExactBundle(
+            databaseRevisions: fixture.exactReleaseBundle.databaseRevisions,
+            semanticDependencyGraphDigest: fixture.exactReleaseBundle
+                .semanticDependencyGraphDigest,
+            contentIdentities: fixture.exactReleaseBundle.contentIdentities
+                + [unclassified],
+            approvalContentIdentities: fixture.exactReleaseBundle
+                .approvalContentIdentities,
+            qualificationContentIdentities: fixture.exactReleaseBundle
+                .qualificationContentIdentities,
+            retentionReceipts: fixture.exactReleaseBundle.retentionReceipts
+        )
+        let request = fixture.replacing(
+            fixture.request(),
+            exactReleaseBundle: exactBundle
+        )
+
+        let result = try await fixture.authorizer().execute(request)
+
+        #expect(result.status == .blocked)
+        #expect(result.diagnostics.contains {
+            $0.code.rawValue == "RELEASE_CONTENT_IDENTITY_INVENTORY_MISMATCH"
+        })
+    }
+
+    @Test("explicit additional content identities participate in exact authorization")
+    func acceptsExplicitAdditionalContentIdentity() async throws {
+        let fixture = try await Fixture()
+        defer { removeFixture(fixture.root) }
+        let additional = try ArtifactID(
+            digest: ContentDigest(
+                algorithm: .sha256,
+                hexadecimalValue: String(repeating: "0", count: 64)
+            ),
+            byteCount: 1
+        )
+        let exactBundle = ReleaseExactBundle(
+            databaseRevisions: fixture.exactReleaseBundle.databaseRevisions,
+            semanticDependencyGraphDigest: fixture.exactReleaseBundle
+                .semanticDependencyGraphDigest,
+            contentIdentities: fixture.exactReleaseBundle.contentIdentities
+                + [additional],
+            approvalContentIdentities: fixture.exactReleaseBundle
+                .approvalContentIdentities,
+            qualificationContentIdentities: fixture.exactReleaseBundle
+                .qualificationContentIdentities,
+            retentionReceipts: fixture.exactReleaseBundle.retentionReceipts
+        )
+        let request = fixture.replacing(
+            fixture.request(),
+            exactReleaseBundle: exactBundle,
+            additionalContentIdentities: [additional]
+        )
+
+        let result = try await fixture.authorizer().execute(request)
+
+        #expect(result.status == .authorized)
+        #expect(result.exactReleaseBundle == exactBundle)
+    }
+
+    @Test("authorization decoding rejects status and payload drift")
+    func decoderRejectsStatusPayloadDrift() async throws {
+        let fixture = try await Fixture()
+        defer { removeFixture(fixture.root) }
+        let result = try await fixture.authorizer().execute(fixture.request())
+        let encoded = try JSONEncoder().encode(result)
+        var object = try #require(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object["status"] = ReleaseAuthorizationStatus.blocked.rawValue
+        let invalid = try JSONSerialization.data(withJSONObject: object)
+
+        #expect(throws: ReleaseAuthorizationResultValidationError
+            .blockedPayloadPresent) {
+            _ = try JSONDecoder().decode(
+                ReleaseAuthorizationResult.self,
+                from: invalid
+            )
+        }
     }
 
     @Test("agent approval fails closed")
@@ -214,22 +313,12 @@ struct ReleaseAuthorizationTests {
     func rejectsApprovalEvidenceMismatch() async throws {
         let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
-        let base = fixture.request()
-        let approval = FlowApprovalRecord(
-            runID: base.runID,
-            stageID: base.stageID,
-            verdict: .approved,
-            reviewer: "reviewer",
-            reviewerKind: .human,
-            createdAt: base.evaluatedAt,
-            evidence: FlowApprovalEvidenceBinding(plan: fixture.planArtifact, stageResult: fixture.planArtifact)
-        )
 
         let result = try await fixture.authorizer(
             approvalAuthenticator: RejectingReleaseApprovalAuthenticator(
                 error: .signoffBundleNotReviewed
             )
-        ).execute(fixture.request(approval: approval))
+        ).execute(fixture.request())
 
         #expect(result.diagnostics.contains {
             $0.code.rawValue == "RELEASE_APPROVAL_AUTHENTICATION_FAILED"
@@ -240,7 +329,11 @@ struct ReleaseAuthorizationTests {
     func rejectsMissingApprovalPlanEvidence() async throws {
         let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
-        try FileManager.default.removeItem(at: fixture.root.appending(path: fixture.planArtifact.path))
+        try FileManager.default.removeItem(
+            at: fixture.root.appending(
+                path: try fixture.relativePath(for: fixture.planArtifact).stringValue
+            )
+        )
 
         let result = try await fixture.authorizer().execute(fixture.request())
 
@@ -366,15 +459,11 @@ struct ReleaseAuthorizationTests {
         let originalArtifact = try #require(bundle.evidenceArtifacts.first)
         let collidingArtifact = ArtifactReference(
             id: originalArtifact.id,
-            locator: ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: "qualification/collision.json"),
-                role: originalArtifact.locator.role,
-                kind: originalArtifact.kind,
-                format: originalArtifact.format
-            ),
-            digest: originalArtifact.digest,
-            byteCount: originalArtifact.byteCount,
-            producer: originalArtifact.producer
+            descriptor: ArtifactDescriptor(
+                role: originalArtifact.descriptor.role,
+                kind: .other,
+                format: originalArtifact.descriptor.format
+            )
         )
         bundle.evidenceArtifacts.append(collidingArtifact)
 
@@ -385,7 +474,7 @@ struct ReleaseAuthorizationTests {
         }
     }
 
-    @Test("signoff bundle requires axis evidence identifiers and artifact producers")
+    @Test("signoff bundle requires axis evidence identifiers")
     func rejectsUnboundAxisEvidence() async throws {
         let fixture = try await Fixture()
         defer { removeFixture(fixture.root) }
@@ -396,19 +485,6 @@ struct ReleaseAuthorizationTests {
         #expect(throws: SignoffBundleCanonicalEncodingError.self) {
             try SignoffBundle.decodeCanonical(from: missingEvidenceID.canonicalData())
         }
-
-        var missingProducer = try fixture.loadBundle()
-        let artifact = try #require(missingProducer.evidenceArtifacts.first)
-        missingProducer.evidenceArtifacts[0] = ArtifactReference(
-            id: artifact.id,
-            locator: artifact.locator,
-            digest: artifact.digest,
-            byteCount: artifact.byteCount
-        )
-        #expect(missingProducer.isReleaseReady == false)
-        #expect(throws: SignoffBundleCanonicalEncodingError.self) {
-            try SignoffBundle.decodeCanonical(from: missingProducer.canonicalData())
-        }
     }
 }
 
@@ -417,10 +493,15 @@ private struct Fixture {
     let evaluatedAt = Date(timeIntervalSince1970: 10_000)
     let toolID = "release-test-tool"
     let bundleReference: SignoffBundleReference
-    let planArtifact: ArtifactReference
+    let bundleFlowArtifact: FlowArtifactBinding
+    let planArtifact: FlowArtifactBinding
+    let approvalArtifact: FlowArtifactBinding
+    let qualificationRecordArtifact: FlowArtifactBinding
     let signoffEvidenceArtifact: ArtifactReference
     let qualificationRequest: ToolQualificationRequest
     let decision: ToolTrustDecision
+    let exactReleaseBundle: ReleaseExactBundle
+    let artifactBindingsByID: [ArtifactID: ReleaseArtifactBinding]
 
     init(includeAllAxes: Bool = true) async throws {
         let fixtureToolID = "release-test-tool"
@@ -432,6 +513,7 @@ private struct Fixture {
             evaluatedAt: evaluatedAt,
             toolID: fixtureToolID
         )
+        var generatedBindings = productionTrust.artifactBindingsByID
         signoffEvidenceArtifact = productionTrust.signoffEvidenceArtifact
         let evidenceRecords = ReleaseSignoffAxis.allCases.map { axis in
             ReleaseSignoffEvidenceReference(
@@ -475,13 +557,8 @@ private struct Fixture {
             path: "signoff-bundle.json",
             role: .output,
             kind: .release,
-            producer: ProducerIdentity(
-                kind: .engine,
-                identifier: "native.release.signoff",
-                version: "2.0.0",
-                build: String(repeating: "a", count: 64)
-            ),
-            root: root
+            root: root,
+            bindings: &generatedBindings
         )
         bundleReference = SignoffBundleReference(
             artifact: bundleArtifact,
@@ -489,11 +566,115 @@ private struct Fixture {
             pdkDigest: bundle.pdkDigest,
             finalLayoutDigest: bundle.finalLayoutDigest
         )
+        bundleFlowArtifact = try Self.flowBinding(
+            bundleArtifact,
+            logicalID: "signoff-stage-result"
+        )
 
         try Data("plan".utf8).write(to: root.appending(path: "plan.json"), options: .atomic)
-        planArtifact = try Self.reference(path: "plan.json", role: .input, kind: .request, root: root)
+        let planReleaseBinding = try Self.reference(
+            path: "plan.json",
+            role: .input,
+            kind: .request,
+            root: root,
+            bindings: &generatedBindings
+        )
+        planArtifact = try Self.flowBinding(
+            planReleaseBinding,
+            logicalID: "release-plan"
+        )
         qualificationRequest = productionTrust.request
         decision = productionTrust.decision
+        let approval = FlowApprovalRecord(
+            runID: "run",
+            stageID: "release",
+            verdict: .approved,
+            reviewer: "reviewer",
+            reviewerKind: .human,
+            createdAt: evaluatedAt,
+            evidence: FlowApprovalEvidenceBinding(
+                plan: planArtifact,
+                stageResult: bundleFlowArtifact
+            )
+        )
+        let approvalURL = root.appending(path: "approval.json")
+        try JSONEncoder().encode(approval).write(to: approvalURL, options: .atomic)
+        let approvalReleaseBinding = try Self.reference(
+            path: "approval.json",
+            role: .output,
+            kind: .report,
+            root: root,
+            bindings: &generatedBindings
+        )
+        approvalArtifact = try Self.flowBinding(
+            approvalReleaseBinding,
+            logicalID: "release-approval-record"
+        )
+        qualificationRecordArtifact = try Self.flowBinding(
+            productionTrust.qualificationRecordArtifact,
+            logicalID: "release-qualification-record"
+        )
+        let databaseID = try DesignDatabaseID(high: 0, low: 1)
+        let revision = DesignRevisionReference(
+            databaseID: databaseID,
+            revisionID: DesignRevisionID(high: 0, low: 1)
+        )
+        let retention = DesignRevisionRetentionReceipt(
+            operation: DesignDatabaseOperationReference(
+                databaseID: databaseID,
+                authorizationSubjectScopeID: try DesignAuthorizationSubjectScopeID(
+                    high: 0,
+                    low: 1
+                ),
+                operationID: try DesignDatabaseOperationID(
+                    rawValue: "release-fixture-retention"
+                )
+            ),
+            claimID: try DesignRevisionRetentionID(rawValue: "release-fixture"),
+            revision: revision,
+            generation: 1,
+            reachabilityGeneration: 1,
+            state: .active,
+            outcomeDigest: try ContentDigest(
+                algorithm: .sha256,
+                hexadecimalValue: String(repeating: "e", count: 64)
+            )
+        )
+        let exactBundleRequest = ReleaseExactBundleBuildRequest(
+            databaseRevisions: [ReleaseDatabaseRevisionBinding(
+                databaseRole: "design",
+                revision: revision
+            )],
+            semanticDependencyGraphDigest: try ContentDigest(
+                algorithm: .sha256,
+                hexadecimalValue: String(repeating: "d", count: 64)
+            ),
+            signoffBundle: bundle,
+            signoffBundleReference: bundleReference,
+            approval: approval,
+            approvalArtifacts: [approvalArtifact],
+            toolQualificationRequests: [productionTrust.request],
+            qualificationRecordArtifacts: [qualificationRecordArtifact],
+            retentionReceipts: [retention]
+        )
+        if includeAllAxes {
+            exactReleaseBundle = try DefaultReleaseExactBundleBuilder().build(
+                exactBundleRequest
+            )
+        } else {
+            let inventory = ReleaseExactContentInventory(request: exactBundleRequest)
+            exactReleaseBundle = ReleaseExactBundle(
+                databaseRevisions: exactBundleRequest.databaseRevisions,
+                semanticDependencyGraphDigest: exactBundleRequest
+                    .semanticDependencyGraphDigest,
+                contentIdentities: inventory.contentIdentities,
+                approvalContentIdentities: inventory.approvalContentIdentities,
+                qualificationContentIdentities: inventory
+                    .qualificationContentIdentities,
+                retentionReceipts: exactBundleRequest.retentionReceipts
+            )
+        }
+        artifactBindingsByID = generatedBindings
     }
 
     func request(
@@ -507,13 +688,22 @@ private struct Fixture {
             reviewer: "reviewer",
             reviewerKind: .human,
             createdAt: evaluatedAt,
-            evidence: FlowApprovalEvidenceBinding(plan: planArtifact, stageResult: bundleReference.artifact)
+            evidence: FlowApprovalEvidenceBinding(
+                plan: planArtifact,
+                stageResult: bundleFlowArtifact
+            )
         )
         return ReleaseAuthorizationRequest(
             runID: "run",
             stageID: "release",
             signoffBundle: bundleReference,
+            exactReleaseBundle: exactReleaseBundle,
             approval: approval,
+            approvalArtifacts: [approvalArtifact],
+            qualificationRecordArtifacts: [qualificationRecordArtifact],
+            artifactBindings: artifactBindingsByID.values.sorted {
+                $0.reference.id.description < $1.reference.id.description
+            },
             toolTrustDecisions: decisions ?? [decision],
             toolQualificationRequests: [qualificationRequest],
             requiredToolIDs: [toolID],
@@ -526,7 +716,10 @@ private struct Fixture {
         approvalAuthenticator: any ReleaseApprovalAuthenticating =
             AcceptingReleaseApprovalAuthenticator()
     ) throws -> DefaultReleaseAuthorizer {
-        let qualificationReader = LocalToolQualificationArtifactReader(workspaceRoot: root)
+        let qualificationReader = TestToolQualificationArtifactReader(
+            root: root,
+            availabilities: artifactBindingsByID.mapValues(\.availability)
+        )
         let qualificationEngine = DefaultToolQualificationEngine(
             artifactReader: qualificationReader,
             producer: try ProducerIdentity(
@@ -548,8 +741,21 @@ private struct Fixture {
         return try SignoffBundle.decodeCanonical(from: data)
     }
 
+    func relativePath(
+        for artifact: FlowArtifactBinding
+    ) throws -> ArtifactRelativePath {
+        guard case .local(_, _, let relativePath) = artifact.availability else {
+            throw ReleaseArtifactBindingError.missingBinding(
+                artifact.reference.id
+            )
+        }
+        return relativePath
+    }
+
     func replacing(
         _ request: ReleaseAuthorizationRequest,
+        exactReleaseBundle: ReleaseExactBundle? = nil,
+        additionalContentIdentities: [ArtifactID]? = nil,
         decisions: [ToolTrustDecision]? = nil,
         qualificationRequests: [ToolQualificationRequest]? = nil,
         requiredToolIDs: [String]? = nil
@@ -558,7 +764,13 @@ private struct Fixture {
             runID: request.runID,
             stageID: request.stageID,
             signoffBundle: request.signoffBundle,
+            exactReleaseBundle: exactReleaseBundle ?? request.exactReleaseBundle,
             approval: request.approval,
+            approvalArtifacts: request.approvalArtifacts,
+            qualificationRecordArtifacts: request.qualificationRecordArtifacts,
+            artifactBindings: request.artifactBindings,
+            additionalContentIdentities: additionalContentIdentities
+                ?? request.additionalContentIdentities,
             toolTrustDecisions: decisions ?? request.toolTrustDecisions,
             toolQualificationRequests: qualificationRequests ?? request.toolQualificationRequests,
             requiredToolIDs: requiredToolIDs ?? request.requiredToolIDs,
@@ -571,18 +783,44 @@ private struct Fixture {
         path: String,
         role: ArtifactRole,
         kind: ArtifactKind,
-        producer: ProducerIdentity? = nil,
-        root: URL
-    ) throws -> ArtifactReference {
-        try LocalArtifactReferencer().reference(
-            ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: path),
+        root: URL,
+        bindings: inout [ArtifactID: ReleaseArtifactBinding]
+    ) throws -> ReleaseArtifactBinding {
+        let data = try Data(contentsOf: root.appending(path: path))
+        let reference = try ArtifactReference(
+            digest: SHA256ContentDigester().digest(data: data),
+            byteCount: UInt64(data.count),
+            descriptor: ArtifactDescriptor(
                 role: role,
                 kind: kind,
                 format: .json
-            ),
-            relativeTo: root,
-            producer: producer
+            )
+        )
+        let binding = try ReleaseArtifactBinding(
+            logicalID: path.replacingOccurrences(of: "/", with: "."),
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(
+                    rawValue: "release-authorization-test-root"
+                ),
+                relativePath: ArtifactRelativePath(
+                    segments: path.split(separator: "/").map(String.init)
+                )
+            )
+        )
+        bindings[reference.id] = binding
+        return binding
+    }
+
+    private static func flowBinding(
+        _ binding: ReleaseArtifactBinding,
+        logicalID: String
+    ) throws -> FlowArtifactBinding {
+        try FlowArtifactBinding(
+            logicalID: logicalID,
+            reference: binding.reference,
+            availability: binding.availability
         )
     }
 }
@@ -619,8 +857,11 @@ struct ProductionTrustFixture {
     let executionProvenance: ExecutionProvenance
     let request: ToolQualificationRequest
     let decision: ToolTrustDecision
+    let qualificationRecordArtifact: ReleaseArtifactBinding
+    let artifactBindingsByID: [ArtifactID: ReleaseArtifactBinding]
 
     init(root: URL, evaluatedAt: Date, toolID: String) async throws {
+        var generatedBindings: [ArtifactID: ReleaseArtifactBinding] = [:]
         let toolBytes = Data("""
         #!/bin/sh
         report=""
@@ -651,14 +892,9 @@ struct ProductionTrustFixture {
             identifier: "release-test-qualification-runner",
             version: "1.0.0"
         )
-        let sourceProducer = try ProducerIdentity(
-            kind: .library,
-            identifier: "release-test-qualified-inputs",
-            version: "1.0.0"
-        )
         let tool = try Self.write(
             toolBytes, path: "qualification/tool", kind: .other,
-            role: .input, producer: toolProducer, root: root
+            role: .input, root: root, bindings: &generatedBindings
         )
         executableArtifact = tool
         try FileManager.default.setAttributes(
@@ -673,33 +909,33 @@ struct ProductionTrustFixture {
         )
         let oracle = try Self.write(
             Data("oracle".utf8), path: "qualification/oracle-tool", kind: .other,
-            role: .input, producer: oracleProducer, root: root
+            role: .input, root: root, bindings: &generatedBindings
         )
         let process = try Self.write(
             Data("process".utf8), path: "qualification/process.json", kind: .technology,
-            role: .input, producer: sourceProducer, root: root
+            role: .input, root: root, bindings: &generatedBindings
         )
         let pdk = try Self.write(
             Data("pdk".utf8), path: "qualification/pdk.json", kind: .technology,
-            role: .input, producer: sourceProducer, root: root
+            role: .input, root: root, bindings: &generatedBindings
         )
         let deck = try Self.write(
             Data("deck".utf8), path: "qualification/deck.json", kind: .ruleDeck,
-            role: .input, producer: sourceProducer, root: root
+            role: .input, root: root, bindings: &generatedBindings
         )
         let input = try Self.write(
             Data("input".utf8), path: "qualification/input.json", kind: .input,
-            role: .input, producer: sourceProducer, root: root
+            role: .input, root: root, bindings: &generatedBindings
         )
         designArtifact = input
         let output = try Self.write(
             Data("output".utf8), path: "qualification/output.json", kind: .report,
-            role: .output, producer: operationalToolProducer, root: root
+            role: .output, root: root, bindings: &generatedBindings
         )
         signoffEvidenceArtifact = output
         let oracleOutput = try Self.write(
             Data("oracle-output".utf8), path: "qualification/oracle-output.json", kind: .report,
-            role: .output, producer: oracleProducer, root: root
+            role: .output, root: root, bindings: &generatedBindings
         )
         scope = ToolQualificationScope(
             implementationID: toolID,
@@ -742,7 +978,7 @@ struct ProductionTrustFixture {
         )
         let corpusArtifact = try Self.write(
             try corpus.canonicalData(), path: "qualification/corpus.json", kind: .evidence,
-            role: .output, producer: issuer, root: root
+            role: .output, root: root, bindings: &generatedBindings
         )
         let oracleResult = ToolOracleQualificationResult(
             resultID: "release-oracle",
@@ -772,7 +1008,7 @@ struct ProductionTrustFixture {
         )
         let oracleArtifact = try Self.write(
             try oracleResult.canonicalData(), path: "qualification/oracle.json", kind: .evidence,
-            role: .output, producer: issuer, root: root
+            role: .output, root: root, bindings: &generatedBindings
         )
         let health = ToolHealthQualificationResult(
             resultID: "release-health",
@@ -786,7 +1022,11 @@ struct ProductionTrustFixture {
         )
         let healthArtifact = try Self.write(
             try health.canonicalData(), path: "qualification/health.json", kind: .evidence,
-            role: .output, producer: issuer, root: root
+            role: .output, root: root, bindings: &generatedBindings
+        )
+        let qualificationReader = TestToolQualificationArtifactReader(
+            root: root,
+            availabilities: generatedBindings.mapValues(\.availability)
         )
         processQualification = try await ToolProcessQualificationEvidenceBuilder().build(
             ToolProcessQualificationEvidenceBuildRequest(
@@ -808,7 +1048,7 @@ struct ProductionTrustFixture {
                 qualifiedAt: evaluatedAt.addingTimeInterval(-10),
                 expiresAt: evaluatedAt.addingTimeInterval(10)
             ),
-            reading: LocalToolQualificationArtifactReader(workspaceRoot: root),
+            reading: qualificationReader,
             at: evaluatedAt
         )
         executionProvenance = try ExecutionProvenance(
@@ -858,9 +1098,15 @@ struct ProductionTrustFixture {
             qualificationScope: scope,
             requireIndependentQualificationEvidence: true
         )
+        let healthCheck = ToolHealthCheckResult(
+            toolID: toolID,
+            status: .passed,
+            evidence: evidence
+        )
         request = ToolQualificationRequest(
             descriptor: descriptor,
             requirement: qualificationRequirement,
+            health: healthCheck,
             inputs: processQualification.identityArtifacts.all
                 + processQualification.evidenceArtifacts
                 + processQualification.inputArtifacts
@@ -868,7 +1114,7 @@ struct ProductionTrustFixture {
             evaluatedAt: evaluatedAt
         )
         let qualificationEngine = DefaultToolQualificationEngine(
-            artifactReader: LocalToolQualificationArtifactReader(workspaceRoot: root),
+            artifactReader: qualificationReader,
             producer: try ProducerIdentity(
                 kind: .library,
                 identifier: "ToolQualification",
@@ -877,6 +1123,31 @@ struct ProductionTrustFixture {
             completionDate: { evaluatedAt }
         )
         decision = try await qualificationEngine.execute(request).decision
+        let qualificationRecord = try await DefaultToolQualificationRecordIssuer().issue(
+            recordID: "release-production-record",
+            descriptor: descriptor,
+            health: healthCheck,
+            issuer: issuer,
+            reading: qualificationReader,
+            issuedAt: evaluatedAt
+        )
+        let qualificationRecordReference = try Self.write(
+            try qualificationRecord.canonicalData(),
+            path: "qualification/record.json",
+            kind: .evidence,
+            role: .output,
+            root: root,
+            bindings: &generatedBindings
+        )
+        guard let retainedQualificationRecord = generatedBindings[
+            qualificationRecordReference.id
+        ] else {
+            throw ReleaseArtifactBindingError.missingBinding(
+                qualificationRecordReference.id
+            )
+        }
+        qualificationRecordArtifact = retainedQualificationRecord
+        artifactBindingsByID = generatedBindings
     }
 
     private static func write(
@@ -884,8 +1155,8 @@ struct ProductionTrustFixture {
         path: String,
         kind: ArtifactKind,
         role: ArtifactRole,
-        producer: ProducerIdentity? = nil,
-        root: URL
+        root: URL,
+        bindings: inout [ArtifactID: ReleaseArtifactBinding]
     ) throws -> ArtifactReference {
         let url = root.appending(path: path)
         try FileManager.default.createDirectory(
@@ -893,16 +1164,27 @@ struct ProductionTrustFixture {
             withIntermediateDirectories: true
         )
         try data.write(to: url, options: .atomic)
-        return try LocalArtifactReferencer().reference(
-            ArtifactLocator(
-                location: try ArtifactLocation(workspaceRelativePath: path),
+        let reference = try ArtifactReference(
+            digest: SHA256ContentDigester().digest(data: data),
+            byteCount: UInt64(data.count),
+            descriptor: ArtifactDescriptor(
                 role: role,
                 kind: kind,
                 format: .json
-            ),
-            relativeTo: root,
-            producer: producer
+            )
         )
+        bindings[reference.id] = try ReleaseArtifactBinding(
+            logicalID: path.replacingOccurrences(of: "/", with: "."),
+            reference: reference,
+            availability: .local(
+                artifactID: reference.id,
+                rootID: ArtifactRootID(rawValue: "release-authorization-test-root"),
+                relativePath: ArtifactRelativePath(
+                    segments: path.split(separator: "/").map(String.init)
+                )
+            )
+        )
+        return reference
     }
 }
 
