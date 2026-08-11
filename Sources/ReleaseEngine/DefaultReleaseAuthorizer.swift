@@ -294,11 +294,23 @@ public struct DefaultReleaseAuthorizer: ReleaseAuthorizing {
     private func validateQualificationRecords(
         _ request: ReleaseAuthorizationRequest
     ) async -> [DesignDiagnostic] {
+        let recordValidator = ToolQualificationRecordValidator()
+        let qualificationArtifactReader = ReleaseToolQualificationArtifactReader(
+            bindings: request.artifactBindings,
+            reader: artifactReader
+        )
         var recordsByToolID: [String: ToolQualificationRecord] = [:]
         for binding in request.qualificationRecordArtifacts {
             do {
                 let data = try await artifactReader.verifiedData(for: binding)
-                let record = try ToolQualificationRecord.decodeCanonical(from: data)
+                let decodedRecord = try ToolQualificationRecord.decodeCanonical(
+                    from: data
+                )
+                let record = try await recordValidator.validatedRecord(
+                    decodedRecord,
+                    expectedToolID: decodedRecord.descriptor.toolID,
+                    reading: qualificationArtifactReader
+                )
                 guard recordsByToolID[record.descriptor.toolID] == nil else {
                     return [diagnostic(
                         "RELEASE_QUALIFICATION_RECORD_DUPLICATE_TOOL",

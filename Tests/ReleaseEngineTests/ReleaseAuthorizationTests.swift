@@ -367,6 +367,103 @@ struct ReleaseAuthorizationTests {
         #expect(result.diagnostics.contains { $0.code.rawValue == "RELEASE_TOOL_TRUST_INVENTORY_MISMATCH" })
     }
 
+    @Test("qualification record decisions are independently reproduced")
+    func rejectsForgedQualificationRecordDecision() async throws {
+        let fixture = try await Fixture()
+        defer { removeFixture(fixture.root) }
+        let base = fixture.request()
+        let originalFlowBinding = try #require(
+            base.qualificationRecordArtifacts.first
+        )
+        guard case .local(_, let rootID, let relativePath) = originalFlowBinding.availability else {
+            Issue.record("Expected a local qualification record fixture.")
+            return
+        }
+        let recordURL = fixture.root.appending(path: relativePath.stringValue)
+        let originalData = try Data(contentsOf: recordURL)
+        var object = try #require(
+            JSONSerialization.jsonObject(with: originalData) as? [String: Any]
+        )
+        var issuanceDecisions = try #require(
+            object["issuanceDecisions"] as? [[String: Any]]
+        )
+        var issuance = try #require(issuanceDecisions.first)
+        var decision = try #require(issuance["decision"] as? [String: Any])
+        decision["diagnostics"] = [[
+            "severity": "warning",
+            "code": "FORGED_RECORD_DECISION",
+            "message": "This diagnostic was not produced by qualification.",
+        ]]
+        issuance["decision"] = decision
+        issuanceDecisions[0] = issuance
+        object["issuanceDecisions"] = issuanceDecisions
+        let forgedData = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        )
+        try forgedData.write(to: recordURL, options: .atomic)
+        let forgedReference = try ArtifactReference(
+            digest: SHA256ContentDigester().digest(data: forgedData),
+            byteCount: UInt64(forgedData.count),
+            descriptor: originalFlowBinding.reference.descriptor
+        )
+        let forgedReleaseBinding = try ReleaseArtifactBinding(
+            logicalID: "qualification.record.forged",
+            reference: forgedReference,
+            availability: .local(
+                artifactID: forgedReference.id,
+                rootID: rootID,
+                relativePath: relativePath
+            )
+        )
+        let forgedFlowBinding = try FlowArtifactBinding(
+            logicalID: originalFlowBinding.logicalID,
+            reference: forgedReference,
+            availability: forgedReleaseBinding.availability
+        )
+        let artifactBindings = base.artifactBindings.filter {
+            $0.reference.id != originalFlowBinding.reference.id
+        } + [forgedReleaseBinding]
+        let exact = ReleaseExactBundle(
+            databaseRevisions: base.exactReleaseBundle.databaseRevisions,
+            semanticDependencyGraphDigest: base.exactReleaseBundle
+                .semanticDependencyGraphDigest,
+            contentIdentities: base.exactReleaseBundle.contentIdentities.map {
+                $0 == originalFlowBinding.reference.id ? forgedReference.id : $0
+            },
+            approvalContentIdentities: base.exactReleaseBundle
+                .approvalContentIdentities,
+            qualificationContentIdentities: base.exactReleaseBundle
+                .qualificationContentIdentities.map {
+                    $0 == originalFlowBinding.reference.id ? forgedReference.id : $0
+                },
+            retentionReceipts: base.exactReleaseBundle.retentionReceipts
+        )
+        let request = ReleaseAuthorizationRequest(
+            runID: base.runID,
+            stageID: base.stageID,
+            signoffBundle: base.signoffBundle,
+            exactReleaseBundle: exact,
+            approval: base.approval,
+            approvalArtifacts: base.approvalArtifacts,
+            qualificationRecordArtifacts: [forgedFlowBinding],
+            artifactBindings: artifactBindings,
+            additionalContentIdentities: base.additionalContentIdentities,
+            toolTrustDecisions: base.toolTrustDecisions,
+            toolQualificationRequests: base.toolQualificationRequests,
+            requiredToolIDs: base.requiredToolIDs,
+            evaluatedAt: base.evaluatedAt,
+            projectRoot: base.projectRoot
+        )
+
+        let result = try await fixture.authorizer().execute(request)
+
+        #expect(result.status == .blocked)
+        #expect(result.diagnostics.contains {
+            $0.code.rawValue == "RELEASE_QUALIFICATION_RECORD_READ_FAILED"
+        })
+    }
+
     @Test("every required tool needs a retained decision and qualification request")
     func rejectsMissingRequiredToolTrust() async throws {
         let fixture = try await Fixture()
